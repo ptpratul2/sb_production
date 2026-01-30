@@ -1,0 +1,97 @@
+{
+ "actions": [],
+ "allow_rename": 1,
+ "creation": "2025-05-14 10:12:10.140073",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "original_rm_code",
+  "original_length",
+  "balance_length",
+  "submit_button",
+  "column_break_pmva",
+  "design_code",
+  "section_type",
+  "width",
+  "generated_item_code",
+  "barcode"
+ ],
+ "fields": [
+  {
+   "fieldname": "original_rm_code",
+   "fieldtype": "Link",
+   "label": "Original RM Code",
+   "options": "Item"
+  },
+  {
+   "fieldname": "original_length",
+   "fieldtype": "Float",
+   "label": "Original Length"
+  },
+  {
+   "fieldname": "balance_length",
+   "fieldtype": "Float",
+   "label": "Balance Length"
+  },
+  {
+   "fieldname": "submit_button",
+   "fieldtype": "Button",
+   "label": "Submit Button"
+  },
+  {
+   "fieldname": "column_break_pmva",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "design_code",
+   "fieldtype": "Data",
+   "label": "Design Code"
+  },
+  {
+   "fieldname": "generated_item_code",
+   "fieldtype": "Read Only",
+   "label": "Generated Item Code"
+  },
+  {
+   "fieldname": "barcode",
+   "fieldtype": "Barcode",
+   "label": "Barcode"
+  },
+  {
+   "fieldname": "section_type",
+   "fieldtype": "Data",
+   "label": "Section Type"
+  },
+  {
+   "fieldname": "width",
+   "fieldtype": "Float",
+   "label": "Width"
+  }
+ ],
+ "grid_page_length": 50,
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2025-05-20 19:55:05.037526",
+ "modified_by": "Administrator",
+ "module": "Sb",
+ "name": "Create Off-Cut Entry",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "row_format": "Dynamic",
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}

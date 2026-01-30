@@ -1,0 +1,133 @@
+{
+ "actions": [],
+ "allow_rename": 1,
+ "creation": "2025-01-23 00:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "fg_code",
+  "rm_code",
+  "rm_item_code",
+  "qty_of_rm",
+  "column_break_reservations",
+  "open_stock_rm_reservation",
+  "open_stock_oc_reservation",
+  "column_break_stock",
+  "remaining_temp_in_oc_wh",
+  "expected_oc_stock",
+  "expected_scrap_stock",
+  "column_break_status",
+  "source_type",
+  "source_status",
+  "ns_flag"
+ ],
+ "fields": [
+  {
+   "fieldname": "fg_code",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "FG Code",
+   "read_only": 1
+  },
+  {
+   "fieldname": "cutting_code",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Cutting Code",
+   "read_only": 1
+  },
+  {
+   "fieldname": "rm_item_code",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "RM Item Code",
+   "options": "Item",
+   "read_only": 1
+  },
+  {
+   "fieldname": "qty_of_rm",
+   "fieldtype": "Float",
+   "in_list_view": 1,
+   "label": "Qty of RM",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_reservations",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "open_stock_rm_reservation",
+   "fieldtype": "Data",
+   "label": "Open Stock RM Reservation",
+   "read_only": 1
+  },
+  {
+   "fieldname": "open_stock_oc_reservation",
+   "fieldtype": "Data",
+   "label": "Open Stock OC Reservation",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_stock",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "remaining_temp_in_oc_wh",
+   "fieldtype": "Float",
+   "label": "Remaining Temp in OC WH",
+   "read_only": 1
+  },
+  {
+   "fieldname": "expected_oc_stock",
+   "fieldtype": "Float",
+   "label": "Expected OC Stock",
+   "read_only": 1
+  },
+  {
+   "fieldname": "expected_scrap_stock",
+   "fieldtype": "Float",
+   "label": "Expected Scrap Stock",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_status",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "source_type",
+   "fieldtype": "Select",
+   "label": "Source Type",
+   "options": "OC\nRM\nNS",
+   "read_only": 1
+  },
+  {
+   "fieldname": "source_status",
+   "fieldtype": "Select",
+   "label": "Source Status",
+   "options": "IS\nNS",
+   "read_only": 1
+  },
+  {
+   "default": 0,
+   "fieldname": "ns_flag",
+   "fieldtype": "Check",
+   "label": "NS Flag",
+   "read_only": 1
+  }
+ ],
+ "grid_page_length": 50,
+ "index_web_pages_for_search": 1,
+ "istable": 1,
+ "links": [],
+ "modified": "2025-01-23 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Sb",
+ "name": "RM OC Simulation",
+ "owner": "Administrator",
+ "permissions": [],
+ "row_format": "Dynamic",
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}

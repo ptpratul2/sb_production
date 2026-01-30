@@ -1,0 +1,83 @@
+{
+ "actions": [],
+ "allow_rename": 1,
+ "creation": "2025-10-02 22:45:03.124234",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "item",
+  "length",
+  "running_meter",
+  "column_break_dvne",
+  "weightmeter",
+  "weightpiece",
+  "standard_weight"
+ ],
+ "fields": [
+  {
+   "fieldname": "item",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Item",
+   "options": "Item"
+  },
+  {
+   "fieldname": "length",
+   "fieldtype": "Int",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Length"
+  },
+  {
+   "fieldname": "running_meter",
+   "fieldtype": "Float",
+   "label": "Running Meter"
+  },
+  {
+   "fieldname": "weightmeter",
+   "fieldtype": "Float",
+   "label": "Weight/Meter"
+  },
+  {
+   "fieldname": "weightpiece",
+   "fieldtype": "Float",
+   "label": "Weight/Piece"
+  },
+  {
+   "fieldname": "column_break_dvne",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "standard_weight",
+   "fieldtype": "Float",
+   "label": "Standard Weight"
+  }
+ ],
+ "grid_page_length": 50,
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2025-10-02 23:11:04.803902",
+ "modified_by": "Administrator",
+ "module": "Sb",
+ "name": "Item Weight Conversion",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "row_format": "Dynamic",
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}

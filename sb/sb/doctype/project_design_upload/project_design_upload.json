@@ -1,0 +1,83 @@
+{
+ "actions": [],
+ "allow_rename": 1,
+ "creation": "2025-05-21 09:19:06.689100",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "project",
+  "file",
+  "column_break_migr",
+  "upload_date",
+  "processed_status",
+  "section_break_iksm",
+  "items"
+ ],
+ "fields": [
+  {
+   "fieldname": "file",
+   "fieldtype": "Attach",
+   "label": "File"
+  },
+  {
+   "fieldname": "items",
+   "fieldtype": "Table",
+   "label": "items",
+   "options": "Project Design Upload Item"
+  },
+  {
+   "fieldname": "column_break_migr",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "upload_date",
+   "fieldtype": "Date",
+   "label": "Upload Date"
+  },
+ {
+  "default": "Open",
+  "fieldname": "processed_status",
+  "fieldtype": "Select",
+  "in_list_view": 1,
+  "label": "Status",
+  "options": "Open\nPlanned\nPartially Processed\nProcessed",
+  "read_only": 1
+ },
+  {
+   "fieldname": "section_break_iksm",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "project",
+   "fieldtype": "Link",
+   "label": "Project",
+   "options": "Project"
+  }
+ ],
+ "grid_page_length": 50,
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2025-08-10 01:25:38.466239",
+ "modified_by": "Administrator",
+ "module": "Sb",
+ "name": "Project Design Upload",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "row_format": "Dynamic",
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}

@@ -1,0 +1,185 @@
+{
+ "actions": [],
+ "allow_rename": 1,
+ "autoname": "hash",
+ "creation": "2025-05-13 17:31:15.054583",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "planning_bom",
+  "column_break_tlve",
+  "project",
+  "column_break_date",
+  "planning_date",
+  "status",
+  "column_break_warehouses",
+  "raw_material_warehouse",
+  "offcut_warehouse",
+  "reserved_warehouse",
+  "column_break_company",
+  "company",
+  "cost_center",
+  "section_break_tadf",
+  "raw_materials",
+  "raw_materials_item",
+  "raw_materials_display",
+  "section_break_simulation",
+  "rm_oc_simulation",
+  "amended_from"
+ ],
+ "fields": [
+  {
+   "fieldname": "raw_materials",
+   "fieldtype": "Table",
+   "label": "Raw Materials",
+   "options": "FG Raw Material Item"
+  },
+  {
+   "fieldname": "section_break_simulation",
+   "fieldtype": "Section Break",
+   "label": "RM OC Simulation"
+  },
+  {
+   "fieldname": "rm_oc_simulation",
+   "fieldtype": "Table",
+   "label": "RM OC Simulation",
+   "options": "RM OC Simulation"
+  },
+  {
+   "fieldname": "project",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Project",
+   "options": "Project",
+   "read_only": 1
+  },
+  {
+   "default": "Draft",
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Status",
+   "options": "Draft\nIn Progress\nSubmitted\nCompleted\nCancelled",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_warehouses",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "Raw Material - DD",
+   "fieldname": "raw_material_warehouse",
+   "fieldtype": "Link",
+   "label": "Raw Material Warehouse",
+   "options": "Warehouse"
+  },
+  {
+   "default": "Off-Cut - DD",
+   "fieldname": "offcut_warehouse",
+   "fieldtype": "Link",
+   "label": "Offcut Warehouse",
+   "options": "Warehouse"
+  },
+  {
+   "default": "Reserved Stock - DD",
+   "fieldname": "reserved_warehouse",
+   "fieldtype": "Link",
+   "label": "Reserved Warehouse",
+   "options": "Warehouse"
+  },
+  {
+   "fieldname": "column_break_company",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "label": "Company",
+   "options": "Company",
+   "reqd": 1
+  },
+  {
+   "fieldname": "cost_center",
+   "fieldtype": "Link",
+   "label": "Cost Center",
+   "options": "Cost Center"
+  },
+  {
+   "default": "Today",
+   "fieldname": "planning_date",
+   "fieldtype": "Date",
+   "in_list_view": 1,
+   "label": "Planning Date",
+   "reqd": 1
+  },
+  {
+   "fieldname": "column_break_date",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "section_break_tadf",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "column_break_tlve",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "raw_materials_display",
+   "fieldtype": "HTML",
+   "label": "Raw Materials Display"
+  },
+  {
+   "fieldname": "raw_materials_item",
+   "fieldtype": "HTML",
+   "label": "Raw Materials Item"
+  },
+  {
+   "fieldname": "planning_bom",
+   "fieldtype": "Table MultiSelect",
+   "label": "Planning BOM",
+   "options": "Planning BOM Multiselect"
+  },
+  {
+   "fieldname": "amended_from",
+   "fieldtype": "Link",
+   "label": "Amended From",
+   "options": "FG Raw Material Selector"
+  },
+  {
+   "fieldname": "amended_from",
+   "fieldtype": "Link",
+   "label": "Amended From",
+   "options": "FG Raw Material Selector"
+  }
+ ],
+ "grid_page_length": 50,
+ "index_web_pages_for_search": 1,
+ "is_submittable": 1,
+ "links": [],
+ "modified": "2025-11-24 18:36:48.754562",
+ "modified_by": "Administrator",
+ "module": "Sb",
+ "name": "FG Raw Material Selector",
+ "naming_rule": "Random",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "row_format": "Dynamic",
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}

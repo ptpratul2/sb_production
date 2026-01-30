@@ -1,0 +1,47 @@
+[
+    {
+        "doctype": "Custom Field",
+        "dt": "Item",
+        "module": "Sb",
+        "name": "Is Off-Cut-Item",
+        "fieldname": "is_off_cut",
+        "fieldtype": "Check",
+        "label": "Is Off-Cut",
+        "insert_after": "stock_uom",
+        "__islocal": 1
+    },
+    {
+        "doctype": "Custom Field",
+        "dt": "Item",
+        "module": "Sb",
+        "name": "Original RM Code-Item",
+        "fieldname": "original_rm_code",
+        "fieldtype": "Data",
+        "label": "Original RM Code",
+        "insert_after": "is_off_cut",
+        "__islocal": 1
+    },
+     {
+        "doctype": "Custom Field",
+        "dt": "Item",
+        "module": "Sb",
+        "name": "Original Length-Item",
+        "fieldname": "original_length",
+        "fieldtype": "Float",
+        "label": "Original Length",
+        "insert_after": "original_rm_code",
+        "__islocal": 1
+    },
+     {
+        "doctype": "Custom Field",
+        "dt": "Item",
+        "module": "Sb",
+        "name": "Design Code-Item",
+        "fieldname": "design_code",
+        "fieldtype": "Data",
+        "label": "Design Code",
+        "insert_after": "original_length",
+        "__islocal": 1
+    }
+    
+]

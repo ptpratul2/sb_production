@@ -1,0 +1,224 @@
+{
+ "actions": [],
+ "allow_rename": 1,
+ "creation": "2025-05-13 17:32:04.203273",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "a",
+  "b",
+  "code",
+  "l1",
+  "l2",
+  "bom_qty",
+  "dwg_no",
+  "u_area",
+  "fg_code",
+  "raw_material_code",
+  "planning_bom",
+  "planning_bom_item_reference",
+  "item_code",
+  "dimension",
+  "length",
+  "remark",
+  "project",
+  "ipo_name",
+  "column_break_wizp",
+  "quantity",
+  "uom",
+  "available_from",
+  "warehouse",
+  "status",
+  "reserve_tag",
+  "available_quantity",
+  "stock_entry",
+  "priority"
+ ],
+ "fields": [
+  {
+   "fieldname": "fg_code",
+   "fieldtype": "Data",
+   "label": "FG Code",
+   "read_only": 1
+  },
+  {
+   "fieldname": "raw_material_code",
+   "fieldtype": "Data",
+   "label": "Raw Material Code"
+  },
+  {
+   "fieldname": "item_code",
+   "fieldtype": "Link",
+   "label": "Item Code",
+   "options": "Item"
+  },
+  {
+   "fieldname": "dimension",
+   "fieldtype": "Data",
+   "label": "Dimension"
+  },
+  {
+   "fieldname": "length",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Length"
+  },
+  {
+   "fieldname": "remark",
+   "fieldtype": "Small Text",
+   "label": "Remark"
+  },
+  {
+   "fetch_from": "planning_bom_item_reference.project",
+   "fieldname": "project",
+   "fieldtype": "Link",
+   "label": "Project",
+   "options": "Project"
+  },
+  {
+   "fieldname": "ipo_name",
+   "fieldtype": "Data",
+   "label": "IPO Name"
+  },
+  {
+   "fieldname": "quantity",
+   "fieldtype": "Float",
+   "label": "Quantity"
+  },
+  {
+   "fieldname": "uom",
+   "fieldtype": "Link",
+   "label": "UOM",
+   "options": "UOM"
+  },
+  {
+   "fieldname": "available_from",
+   "fieldtype": "Data",
+   "label": "Available from"
+  },
+  {
+   "fieldname": "column_break_wizp",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "warehouse",
+   "fieldtype": "Link",
+   "label": "Warehouse",
+   "options": "Warehouse"
+  },
+  {
+   "fetch_from": "project_design_item_reference.a",
+   "fieldname": "a",
+   "fieldtype": "Data",
+   "label": "A",
+   "read_only": 1
+  },
+  {
+   "fetch_from": "project_design_item_reference.b",
+   "fieldname": "b",
+   "fieldtype": "Data",
+   "label": "B",
+   "read_only": 1
+  },
+  {
+   "fetch_from": "project_design_item_reference.l1",
+   "fieldname": "l1",
+   "fieldtype": "Data",
+   "label": "L1",
+   "read_only": 1
+  },
+  {
+   "fetch_from": "project_design_item_reference.l2",
+   "fieldname": "l2",
+   "fieldtype": "Data",
+   "label": "L2",
+   "read_only": 1
+  },
+  {
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "label": "Status",
+   "options": "IS\nNIS"
+  },
+  {
+   "default": "0",
+   "fieldname": "reserve_tag",
+   "fieldtype": "Check",
+   "label": "Reserve Tag"
+  },
+  {
+   "fieldname": "available_quantity",
+   "fieldtype": "Float",
+   "label": "Available Quantity"
+  },
+  {
+   "fieldname": "stock_entry",
+   "fieldtype": "Link",
+   "label": "Stock Entry",
+   "options": "Stock Entry"
+  },
+  {
+   "fieldname": "priority",
+   "fieldtype": "Select",
+   "label": "Priority",
+   "options": "1\n2\n3\n4\n5\n6"
+  },
+  {
+   "fetch_from": "project_design_item_reference.code",
+   "fieldname": "code",
+   "fieldtype": "Data",
+   "label": "Code",
+   "read_only": 1
+  },
+  {
+   "fetch_from": "project_design_item_reference.quantity",
+   "fieldname": "bom_qty",
+   "fieldtype": "Float",
+   "label": "BOM Qty",
+   "read_only": 1
+  },
+  {
+   "fetch_from": "planning_bom_item_reference.u_area",
+   "fieldname": "u_area",
+   "fieldtype": "Float",
+   "label": "U Area",
+   "read_only": 1
+  },
+  {
+   "fieldname": "planning_bom_item_reference",
+   "fieldtype": "Link",
+   "hidden": 1,
+   "label": "Planning BOM item Reference",
+   "options": "FG Components",
+   "read_only": 1
+  },
+  {
+   "fieldname": "planning_bom",
+   "fieldtype": "Link",
+   "label": "Planning BOM",
+   "options": "Planning BOM"
+  },
+  {
+   "fetch_from": "project_design_item_reference.dwg_no",
+   "fieldname": "dwg_no",
+   "fieldtype": "Data",
+   "label": "DWN NO",
+   "read_only": 1
+  }
+ ],
+ "grid_page_length": 50,
+ "index_web_pages_for_search": 1,
+ "istable": 1,
+ "links": [],
+ "modified": "2025-11-05 12:02:48.552339",
+ "modified_by": "Administrator",
+ "module": "Sb",
+ "name": "FG Raw Material Item",
+ "owner": "Administrator",
+ "permissions": [],
+ "row_format": "Dynamic",
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}

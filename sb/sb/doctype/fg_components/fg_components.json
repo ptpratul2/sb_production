@@ -1,0 +1,179 @@
+{
+ "actions": [],
+ "allow_rename": 1,
+ "creation": "2025-05-21 09:57:40.470650",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "fg_code",
+  "description",
+  "quantity",
+  "required_qty",
+  "processed_qty",
+  "remaining_qty",
+  "client_area",
+  "room_no",
+  "flat_no",
+  "dwg_no",
+  "project_design_upload",
+  "project_design_upload_item",
+  "column_break_xbqy",
+  "uom",
+  "a",
+  "b",
+  "code",
+  "l1",
+  "l2",
+  "u_area",
+  "sb_area",
+  "ipo_name",
+  "project"
+ ],
+ "fields": [
+  {
+   "fieldname": "fg_code",
+   "fieldtype": "Data",
+   "label": "FG Code"
+  },
+  {
+   "fieldname": "quantity",
+   "fieldtype": "Float",
+   "label": "Quantity"
+  },
+  {
+   "default": "0",
+   "fieldname": "required_qty",
+   "fieldtype": "Float",
+   "label": "Required Qty",
+   "read_only": 1,
+   "description": "Total quantity required (from consolidation)"
+  },
+  {
+   "default": "0",
+   "fieldname": "processed_qty",
+   "fieldtype": "Float",
+   "label": "Processed Qty",
+   "read_only": 1,
+   "description": "Quantity processed via FG Raw Material Selector"
+  },
+  {
+   "default": "0",
+   "fieldname": "remaining_qty",
+   "fieldtype": "Float",
+   "label": "Remaining Qty",
+   "read_only": 1,
+   "in_list_view": 1,
+   "description": "Remaining quantity (required_qty - processed_qty)"
+  },
+  {
+   "fieldname": "description",
+   "fieldtype": "Small Text",
+   "label": "Description"
+  },
+  {
+   "fieldname": "uom",
+   "fieldtype": "Link",
+   "label": "UOM",
+   "options": "UOM"
+  },
+  {
+   "fieldname": "column_break_xbqy",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "a",
+   "fieldtype": "Data",
+   "label": "A"
+  },
+  {
+   "fieldname": "client_area",
+   "fieldtype": "Float",
+   "label": "CLIENT AREA"
+  },
+  {
+   "fieldname": "room_no",
+   "fieldtype": "Data",
+   "label": "ROOM NO"
+  },
+  {
+   "fieldname": "flat_no",
+   "fieldtype": "Data",
+   "label": "FLAT NO"
+  },
+  {
+   "fieldname": "b",
+   "fieldtype": "Data",
+   "label": "B"
+  },
+  {
+   "fieldname": "code",
+   "fieldtype": "Data",
+   "label": "Code"
+  },
+  {
+   "fieldname": "l1",
+   "fieldtype": "Data",
+   "label": "L1"
+  },
+  {
+   "fieldname": "l2",
+   "fieldtype": "Data",
+   "label": "L2"
+  },
+  {
+   "fieldname": "u_area",
+   "fieldtype": "Float",
+   "label": "U. AREA"
+  },
+  {
+   "fieldname": "sb_area",
+   "fieldtype": "Float",
+   "label": "SB AREA"
+  },
+  {
+   "fieldname": "dwg_no",
+   "fieldtype": "Data",
+   "label": "DWG NO"
+  },
+  {
+   "fieldname": "ipo_name",
+   "fieldtype": "Data",
+   "label": "IPO Name"
+  },
+  {
+   "fieldname": "project_design_upload_item",
+   "fieldtype": "Data",
+   "hidden": 1,
+   "label": "Project Design Upload Item",
+   "read_only": 1
+  },
+  {
+   "fieldname": "project_design_upload",
+   "fieldtype": "Link",
+   "label": "Project Design Upload",
+   "options": "Project Design Upload"
+  },
+  {
+   "fetch_from": "project_design_upload.project",
+   "fieldname": "project",
+   "fieldtype": "Link",
+   "label": "Project",
+   "options": "Project"
+  }
+ ],
+ "grid_page_length": 50,
+ "index_web_pages_for_search": 1,
+ "istable": 1,
+ "links": [],
+ "modified": "2025-08-10 01:43:15.389794",
+ "modified_by": "Administrator",
+ "module": "Sb",
+ "name": "FG Components",
+ "owner": "Administrator",
+ "permissions": [],
+ "row_format": "Dynamic",
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}
