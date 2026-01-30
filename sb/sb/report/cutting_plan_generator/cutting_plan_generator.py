@@ -16,9 +16,9 @@ def parse_dimension(dimension, remove_tolerance=False, is_child_part=False):
         l1, l2: Parsed dimensions (strings)
     
     Note:
-        - Handles single dimensions: "850" -> "845"
-        - Handles comma-separated: "850,920" -> "845,915"
-        - Handles X-separated (STIFF PLATE): "90X90X4" -> "85X85X4"
+        - Handles single dimensions: "850" -> "846"
+        - Handles comma-separated: "850,920" -> "846,916"
+        - Handles X-separated (STIFF PLATE): "90X90X4" -> "86X86X4"
     """
     if not dimension: 
         return "", ""
@@ -42,8 +42,8 @@ def parse_dimension(dimension, remove_tolerance=False, is_child_part=False):
                 for part in parts:
                     try:
                         val = int(float(part.strip()))
-                        # Only subtract 5 if the value is greater than 5
-                        processed_parts.append(str(val - 5) if val > 5 else str(val))
+                        # Only subtract 4 if the value is greater than 4
+                        processed_parts.append(str(val - 4) if val > 4 else str(val))
                     except (ValueError, TypeError):
                         processed_parts.append(part.strip())
                 return "X".join(processed_parts)
@@ -51,7 +51,7 @@ def parse_dimension(dimension, remove_tolerance=False, is_child_part=False):
                 # Single dimension
                 try:
                     val = int(float(dim_str))
-                    return str(val - 5)
+                    return str(val - 4)
                 except (ValueError, TypeError):
                     return dim_str
         
