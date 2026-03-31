@@ -1,3 +1,31 @@
+// RM/OC runs in a background worker; notify when finished (avoid duplicate handlers)
+if (!frappe._sb_rm_oc_realtime_registered) {
+    frappe._sb_rm_oc_realtime_registered = true;
+    frappe.realtime.on('rm_oc_calculation_done', function (data) {
+        if (!data || !data.message) {
+            return;
+        }
+        const m = data.message;
+        if (m.status === 'success') {
+            frappe.show_alert({ message: m.message, indicator: 'green' });
+            if (
+                cur_frm &&
+                cur_frm.doctype === 'FG Raw Material Selector' &&
+                cur_frm.doc &&
+                cur_frm.doc.name === m.docname
+            ) {
+                cur_frm.reload_doc();
+            }
+        } else {
+            frappe.msgprint({
+                title: __('RM/OC calculation failed'),
+                message: m.message,
+                indicator: 'red'
+            });
+        }
+    });
+}
+
 frappe.ui.form.on('FG Raw Material Selector', {
     refresh: function (frm) {
         // Set default company if not set
@@ -88,9 +116,22 @@ frappe.ui.form.on('FG Raw Material Selector', {
                         fg_selector_name: frm.doc.name
                     },
                     freeze: true,
-                    freeze_message: __('Calculating RM/OC usage...'),
+                    freeze_message: __('Queueing RM/OC calculation (runs in background)...'),
                     callback: function (r) {
-                        if (!r.exc && r.message) {
+                        if (r.exc) {
+                            return;
+                        }
+                        if (!r.message) {
+                            return;
+                        }
+                        if (typeof r.message === 'object' && r.message.status === 'queued') {
+                            frappe.show_alert({
+                                message: r.message.message,
+                                indicator: 'blue'
+                            });
+                            return;
+                        }
+                        if (typeof r.message === 'string') {
                             frappe.show_alert({
                                 message: r.message,
                                 indicator: 'green'

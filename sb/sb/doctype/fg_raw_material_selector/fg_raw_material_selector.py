@@ -1464,23 +1464,10 @@ def fetch_pending_items(docname):
         frappe.throw(f"Failed to fetch pending items: {str(e)}")
 
 
-@frappe.whitelist()
-def rm_oc_calculator(fg_selector_name: str):
+def _run_rm_oc_calculation(fg_selector_name: str) -> str:
     """
-    Run RM / OC calculator for a given FG Raw Material Selector.
-
-    Output structure (RM OC Simulation child table) is aligned to Excel:
-
-    FG Code
-    RM Code
-    Qty of RM
-    Open_Stock RM Reservation
-    Open_Stock OC Reservation
-    Remaining Temp in OC WH
-    Expected OC Stock
-    Expected Scrap Stock
-
-    Plus internal fields: source_type, source_status, ns_flag.
+    Run RM / OC calculator (sync). Used by background worker for large datasets
+    to avoid HTTP / Gunicorn timeouts.
     """
     if not fg_selector_name:
         frappe.throw("FG Raw Material Selector name is required")
@@ -1684,3 +1671,70 @@ def rm_oc_calculator(fg_selector_name: str):
     frappe.db.commit()
 
     return f"RM / OC calculation completed for FG Raw Material Selector {fg_selector_name}"
+
+
+def rm_oc_calculator_background(fg_selector_name, user):
+    """Run RM/OC in a worker (long timeout). Notifies the user via realtime when done."""
+    try:
+        msg = _run_rm_oc_calculation(fg_selector_name)
+        frappe.publish_realtime(
+            event="rm_oc_calculation_done",
+            message={
+                "status": "success",
+                "message": msg,
+                "docname": fg_selector_name,
+            },
+            user=user,
+        )
+    except Exception as e:
+        frappe.log_error(
+            message=frappe.get_traceback(),
+            title="RM/OC Calculator Error",
+        )
+        frappe.publish_realtime(
+            event="rm_oc_calculation_done",
+            message={
+                "status": "error",
+                "message": str(e),
+                "docname": fg_selector_name,
+            },
+            user=user,
+        )
+
+
+@frappe.whitelist()
+def rm_oc_calculator(fg_selector_name: str):
+    """
+    Queue RM / OC calculation on the long worker queue.
+
+    Output structure (RM OC Simulation child table) is aligned to Excel:
+
+    FG Code
+    RM Code
+    Qty of RM
+    Open_Stock RM Reservation
+    Open_Stock OC Reservation
+    Remaining Temp in OC WH
+    Expected OC Stock
+    Expected Scrap Stock
+
+    Plus internal fields: source_type, source_status, ns_flag.
+    """
+    if not fg_selector_name:
+        frappe.throw("FG Raw Material Selector name is required")
+
+    job = frappe.enqueue(
+        "sb.sb.doctype.fg_raw_material_selector.fg_raw_material_selector.rm_oc_calculator_background",
+        queue="long",
+        timeout=7200,
+        fg_selector_name=fg_selector_name,
+        user=frappe.session.user,
+    )
+
+    return {
+        "status": "queued",
+        "message": _("RM/OC calculation has been queued (Job ID: {0}). You will be notified when it completes.").format(
+            job.id
+        ),
+        "job_id": job.id,
+    }
