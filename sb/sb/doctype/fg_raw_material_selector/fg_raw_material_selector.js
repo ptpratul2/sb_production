@@ -123,7 +123,7 @@ frappe.ui.form.on('FG Raw Material Selector', {
                     }
 
                     frappe.confirm(
-                        __('This will create a Material Transfer Stock Entry and move all allocated OC/RM pieces to <b>{0}</b>.<br><br>Continue?', [frm.doc.reserved_warehouse || 'Reserved Stock - DD']),
+                        __('This will create a Material Transfer Stock Entry and move all allocated OC/RM pieces to <b>{0}</b>.<br><br>Continue?', [frm.doc.reserved_warehouse || 'Reserve - Trial - Sbs']),
                         function () {
                             frappe.call({
                                 method: 'sb.sb.stock_reserve.reserve_stock_physically',

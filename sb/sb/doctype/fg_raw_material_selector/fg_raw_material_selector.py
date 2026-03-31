@@ -578,8 +578,8 @@ class FGRawMaterialSelector(Document):
             """Check if an item has stock available in warehouses"""
             try:
                 # Use document's warehouse fields if set, otherwise use defaults
-                offcut_wh = getattr(self, 'offcut_warehouse', None) or "Off-Cut - DD"
-                raw_material_wh = getattr(self, 'raw_material_warehouse', None) or "Raw Material - DD"
+                offcut_wh = getattr(self, 'offcut_warehouse', None) or "OC - Trial - Sbs"
+                raw_material_wh = getattr(self, 'raw_material_warehouse', None) or "RM - Trial - Sbs"
                 warehouses_to_check = [offcut_wh, raw_material_wh]
                 total_qty = 0
                 for warehouse in warehouses_to_check:
@@ -1487,8 +1487,8 @@ def rm_oc_calculator(fg_selector_name: str):
 
     doc = frappe.get_doc("FG Raw Material Selector", fg_selector_name)
 
-    oc_warehouse = doc.offcut_warehouse or "Off-Cut - DD"
-    rm_warehouse = doc.raw_material_warehouse or "Raw Material - DD"
+    oc_warehouse = doc.offcut_warehouse or "OC - Trial - Sbs"
+    rm_warehouse = doc.raw_material_warehouse or "RM - Trial - Sbs"
     min_oc_length_mm = 200  # if balance < this, it is treated as scrap
 
     if not hasattr(doc, "raw_materials"):
