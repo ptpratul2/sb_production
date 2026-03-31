@@ -169,7 +169,7 @@ def create_material_request_for_shortfall(fg_selector_name):
         mr.fg_raw_material_selector = doc.name  # Optional reference
 
         # Get warehouse from doc or default
-        warehouse = doc.raw_material_warehouse or "Raw Material - DD"
+        warehouse = doc.raw_material_warehouse or "RM - Trial - Sbs"
 
         import math
 

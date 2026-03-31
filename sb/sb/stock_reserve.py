@@ -38,9 +38,9 @@ def reserve_stock_background(fg_selector_name, user):
             )
             return
 
-        reserved_warehouse = doc.reserved_warehouse or "Reserved Stock - DD"
-        oc_warehouse = doc.offcut_warehouse or "Off-Cut - DD"
-        rm_warehouse = doc.raw_material_warehouse or "Raw Material - DD"
+        reserved_warehouse = doc.reserved_warehouse or "Reserved Stock - Sbs"
+        oc_warehouse = doc.offcut_warehouse or "OC - Trial - Sbs"
+        rm_warehouse = doc.raw_material_warehouse or "RM - Trial - Sbs"
         company = doc.company or frappe.defaults.get_user_default("company")
         cost_center = doc.cost_center or frappe.defaults.get_user_default("cost_center")
 
@@ -196,8 +196,8 @@ def return_unconsumed_reserved_stock(fg_selector_name):
     """Return unconsumed stock from Reserved warehouse back to default."""
     doc = frappe.get_doc("FG Raw Material Selector", fg_selector_name)
     # Use document's warehouses if set, otherwise use defaults
-    source_warehouse = getattr(doc, 'reserved_warehouse', None) or "Reserved Stock - DD"
-    default_warehouse = getattr(doc, 'raw_material_warehouse', None) or "Raw Material - DD"
+    source_warehouse = getattr(doc, 'reserved_warehouse', None) or "Reserved Stock - Sbs"
+    default_warehouse = getattr(doc, 'raw_material_warehouse', None) or "RM - Trial - Sbs"
     
     # Get company and cost_center from document
     company = getattr(doc, 'company', None) or frappe.defaults.get_user_default("company")
@@ -300,7 +300,7 @@ def return_unconsumed_reserved_stock(fg_selector_name):
 @frappe.whitelist()
 def get_available_qty(item_code, uom):
     """Return quantity of item excluding reserved warehouses."""
-    warehouses_to_exclude = ["Reserved Stock - DD"]
+    warehouses_to_exclude = ["Reserved Stock - Sbs"]
     warehouses = frappe.get_all("Warehouse", filters={"is_group": 0}, pluck="name")
 
     total = 0
@@ -322,13 +322,13 @@ def get_stock_for_items(items, fg_selector_name=None):
     if fg_selector_name:
         try:
             doc = frappe.get_doc("FG Raw Material Selector", fg_selector_name)
-            offcut_wh = getattr(doc, 'offcut_warehouse', None) or "Off-Cut - DD"
-            raw_material_wh = getattr(doc, 'raw_material_warehouse', None) or "Raw Material - DD"
+            offcut_wh = getattr(doc, 'offcut_warehouse', None) or "OC - Trial - Sbs"
+            raw_material_wh = getattr(doc, 'raw_material_warehouse', None) or "RM - Trial - Sbs"
             warehouses_to_check = [offcut_wh, raw_material_wh]
         except:
-            warehouses_to_check = ["Off-Cut - DD", "Raw Material - DD"]
+            warehouses_to_check = ["OC - Trial - Sbs", "RM - Trial - Sbs"]
     else:
-        warehouses_to_check = ["Off-Cut - DD", "Raw Material - DD"]
+        warehouses_to_check = ["OC - Trial - Sbs", "RM - Trial - Sbs"]
 
     for item in items:
         item_code = item.get("item_code")
