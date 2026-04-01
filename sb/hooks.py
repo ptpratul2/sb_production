@@ -51,12 +51,15 @@ import frappe
 # doctype_tree_js = {"doctype" : "public/js/doctype_tree.js"}
 # doctype_calendar_js = {"doctype" : "public/js/doctype_calendar.js"}
 
-doctype_js = {"Work Order" : "public/js/workorder.js"}
-doctype_js = {"Material Request" : "public/js/material_request_length.js"}
-doctype_js = {"Stock Entry" : "public/js/stock_entry_length.js"}
-doctype_js = {"Purchase Receipt" : "public/js/purchase_receipt_length.js"}
-doctype_js = {"Purchase Order" : "public/js/purchase_order_length.js"}
-doctype_js = {"FG Raw Material Selector" : "public/js/offcut_report.js"}
+# One dict only — each assignment was overwriting the previous, so only the last doctype_js loaded.
+doctype_js = {
+	"Work Order": "public/js/workorder.js",
+	"Material Request": "public/js/material_request_length.js",
+	"Stock Entry": "public/js/stock_entry_length.js",
+	"Purchase Receipt": "public/js/purchase_receipt_length.js",
+	"Purchase Order": "public/js/purchase_order_length.js",
+	"FG Raw Material Selector": "public/js/offcut_report.js",
+}
 # Svg Icons
 # ------------------
 # include app icons in desk
@@ -138,9 +141,9 @@ doctype_js = {"FG Raw Material Selector" : "public/js/offcut_report.js"}
 # ---------------
 # Override standard doctype classes
 
-# override_doctype_class = {
-# 	"ToDo": "custom_app.overrides.CustomToDo"
-# }
+override_doctype_class = {
+	"Repost Item Valuation": "sb.sb.repost_item_valuation_override.RepostItemValuation",
+}
 
 # Document Events
 # ---------------
@@ -155,26 +158,19 @@ doctype_js = {"FG Raw Material Selector" : "public/js/offcut_report.js"}
 # }
 
 doc_events = {
+    # Bulk length update after all SLEs created (1 SQL UPDATE per voucher, not per SLE row)
     "Stock Entry": {
-        "on_submit": [
-            "sb.sb.stock_hooks.update_length_in_sle",
-            # "sb.sb.stock_hooks.update_serial_no_length",
-        ],
+        "on_submit": "sb.sb.stock_hooks.sync_sle_length_after_submit",
         "on_cancel": [
             "sb.sb.stock_hooks.clear_length_in_sle",
-        ]
-
+        ],
     },
     "Purchase Receipt": {
-        "on_submit": "sb.sb.stock_hooks.update_length_in_sle",
-        "on_cancel": "sb.sb.stock_hooks.clear_length_in_sle"
-
+        "on_submit": "sb.sb.stock_hooks.sync_sle_length_after_submit",
+        "on_cancel": "sb.sb.stock_hooks.clear_length_in_sle",
     },
     "Serial and Batch Bundle": {
         "on_submit": "sb.sb.stock_reserve.update_serial_no_length_from_bundle"
-    },
-    "Stock Reservation Entry": {
-        "on_cancel": "sb.sb.stock_reserve.clear_ghost_bundles"
     }
 }
 

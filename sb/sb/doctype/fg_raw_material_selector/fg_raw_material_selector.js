@@ -2,12 +2,46 @@
 if (!frappe._sb_rm_oc_realtime_registered) {
     frappe._sb_rm_oc_realtime_registered = true;
     frappe.realtime.on('rm_oc_calculation_done', function (data) {
-        if (!data || !data.message) {
+        console.log('RM/OC calculation_done event received:', data);
+        
+        if (!data) {
+            console.error('No data received in rm_oc_calculation_done event');
             return;
         }
-        const m = data.message;
+        
+        // Handle both message structures: data.message or data directly
+        const m = data.message || data;
+        
+        // Handle legacy string format (old cached worker code)
+        if (typeof m === 'string') {
+            // If it contains "completed", treat as success
+            if (m.toLowerCase().includes('completed') && !m.toLowerCase().includes('fail')) {
+                frappe.show_alert({ 
+                    message: m, 
+                    indicator: 'green' 
+                });
+                if (cur_frm && cur_frm.doctype === 'FG Raw Material Selector') {
+                    cur_frm.reload_doc();
+                }
+            } else {
+                // String but looks like error
+                frappe.msgprint({
+                    title: __('RM/OC Calculation Failed'),
+                    message: m,
+                    indicator: 'red'
+                });
+            }
+            return;
+        }
+        
+        // Handle new object format
+        if (!m || typeof m !== 'object') {
+            console.error('Invalid message structure:', m);
+            return;
+        }
+        
         if (m.status === 'success') {
-            frappe.show_alert({ message: m.message, indicator: 'green' });
+            frappe.show_alert({ message: m.message || 'Calculation completed', indicator: 'green' });
             if (
                 cur_frm &&
                 cur_frm.doctype === 'FG Raw Material Selector' &&
@@ -17,10 +51,25 @@ if (!frappe._sb_rm_oc_realtime_registered) {
                 cur_frm.reload_doc();
             }
         } else {
+            // Show error prominently with full message
+            const error_msg = m.message || 'Unknown error occurred';
+            const doc_name = m.docname || 'Unknown';
+            
             frappe.msgprint({
-                title: __('RM/OC calculation failed'),
-                message: m.message,
-                indicator: 'red'
+                title: __('RM/OC Calculation Failed'),
+                message: `<div style="color: red; font-weight: bold;">${error_msg}</div>
+                          <br><br>
+                          <p>Document: ${doc_name}</p>
+                          <p>Check Error Log for full traceback.</p>`,
+                indicator: 'red',
+                primary_action: {
+                    label: __('View Error Log'),
+                    action: function() {
+                        frappe.set_route('List', 'Error Log', {
+                            'creation': ['>', frappe.datetime.add_days(frappe.datetime.now_datetime(), -1)]
+                        });
+                    }
+                }
             });
         }
     });
@@ -207,11 +256,30 @@ frappe.ui.form.on('FG Raw Material Selector', {
         // Listen for stock reservation completion
         frappe.realtime.on('stock_reservation_done', function (data) {
             if (frm.doc.name === data.message.docname) {
-                frappe.show_alert({
-                    message: data.message.message,
-                    indicator: 'green'
-                });
-                frm.reload_doc();
+                if (data.message.status === 'success') {
+                    frappe.show_alert({
+                        message: data.message.message,
+                        indicator: 'green'
+                    });
+                    frm.reload_doc();
+                } else if (data.message.status === 'error') {
+                    frappe.msgprint({
+                        title: __('Stock Reservation Failed'),
+                        message: `<div style="color: red; font-weight: bold;">${data.message.message}</div>
+                                  <br><br>
+                                  <p>Document: ${data.message.docname}</p>
+                                  <p>Check Error Log for full traceback.</p>`,
+                        indicator: 'red',
+                        primary_action: {
+                            label: __('View Error Log'),
+                            action: function() {
+                                frappe.set_route('List', 'Error Log', {
+                                    'creation': ['>', frappe.datetime.add_days(frappe.datetime.now_datetime(), -1)]
+                                });
+                            }
+                        }
+                    });
+                }
             }
         });
         // Status buttons for submitted documents

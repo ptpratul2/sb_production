@@ -1667,6 +1667,9 @@ def _run_rm_oc_calculation(fg_selector_name: str) -> str:
         has_ns = any(r["ns_flag"] for r in sim_rows if r["fg_code"] == fg)
         raw_row.status = "NIS" if has_ns else "IS"
 
+    # Reconnect to database (long-running jobs may have stale connections)
+    frappe.db.connect()
+    
     doc.save(ignore_permissions=True)
     frappe.db.commit()
 
@@ -1675,8 +1678,19 @@ def _run_rm_oc_calculation(fg_selector_name: str) -> str:
 
 def rm_oc_calculator_background(fg_selector_name, user):
     """Run RM/OC in a worker (long timeout). Notifies the user via realtime when done."""
+    # Wrap everything in try/catch to handle errors at any point
+    error_occurred = False
+    error_msg = None
+    
     try:
+        # Ensure fresh DB connection (long-running context)
+        frappe.db.connect()
+        
+        if not fg_selector_name:
+            raise ValueError("FG Raw Material Selector name is required")
+        
         msg = _run_rm_oc_calculation(fg_selector_name)
+        
         frappe.publish_realtime(
             event="rm_oc_calculation_done",
             message={
@@ -1687,19 +1701,33 @@ def rm_oc_calculator_background(fg_selector_name, user):
             user=user,
         )
     except Exception as e:
-        frappe.log_error(
-            message=frappe.get_traceback(),
-            title="RM/OC Calculator Error",
-        )
-        frappe.publish_realtime(
-            event="rm_oc_calculation_done",
-            message={
-                "status": "error",
-                "message": str(e),
-                "docname": fg_selector_name,
-            },
-            user=user,
-        )
+        error_occurred = True
+        error_msg = str(e) or "Unknown error occurred"
+        traceback_msg = frappe.get_traceback()
+        
+        # Try to log error (with fresh connection in case that's the issue)
+        try:
+            frappe.db.connect()
+            frappe.log_error(
+                message=traceback_msg,
+                title=f"RM/OC Calculator Error - {fg_selector_name or 'Unknown'}",
+            )
+        except Exception as log_err:
+            print(f"Failed to log error: {log_err}")
+        
+        # Always send notification, even if logging fails
+        try:
+            frappe.publish_realtime(
+                event="rm_oc_calculation_done",
+                message={
+                    "status": "error",
+                    "message": error_msg,
+                    "docname": fg_selector_name or "Unknown",
+                },
+                user=user,
+            )
+        except Exception as rt_err:
+            print(f"Failed to publish realtime: {rt_err}, original error: {error_msg}")
 
 
 @frappe.whitelist()

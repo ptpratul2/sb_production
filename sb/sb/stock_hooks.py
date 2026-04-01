@@ -1,31 +1,116 @@
 import frappe
 from frappe.utils import cint, flt
 
-def update_length_in_sle(doc, method):
-    """
-    Copy custom_length and custom_total_length from items into Stock Ledger Entries
-    after document is submitted.
-    """
-    for item in doc.items:
-        if not item.custom_length and not item.custom_total_length:
-            continue
 
-        sle_list = frappe.get_all(
-            "Stock Ledger Entry",
-            filters={"voucher_no": doc.name, "voucher_detail_no": item.name},
-            fields=["name"]
+def sync_sle_length_after_submit(doc, method):
+    """
+    Stock Entry / Purchase Receipt on_submit — runs after ERPNext creates all SLEs.
+    Does ONE bulk SQL UPDATE to copy custom_length from voucher lines to all SLEs.
+    
+    Much faster than per-row hooks: 1 query instead of N queries for N-line entries.
+    """
+    if doc.doctype not in ("Stock Entry", "Purchase Receipt") or doc.docstatus != 1:
+        return
+
+    if doc.doctype == "Stock Entry":
+        frappe.db.sql(
+            """
+            UPDATE `tabStock Ledger Entry` sle
+            INNER JOIN `tabStock Entry Detail` sed
+                ON sed.name = sle.voucher_detail_no AND sed.parent = sle.voucher_no
+            SET
+                sle.custom_length = IFNULL(sed.custom_length, 0),
+                sle.custom_total_length = IF(
+                    IFNULL(sed.custom_length, 0) != 0,
+                    IFNULL(sed.custom_length, 0) * sle.actual_qty,
+                    IFNULL(sed.custom_total_length, 0)
+                )
+            WHERE
+                sle.voucher_no = %s
+                AND sle.voucher_type = 'Stock Entry'
+                AND IFNULL(sle.is_cancelled, 0) = 0
+                AND (IFNULL(sed.custom_length, 0) != 0 OR IFNULL(sed.custom_total_length, 0) != 0)
+            """,
+            (doc.name,),
         )
-        for sle in sle_list:
-            frappe.db.set_value(
-                "Stock Ledger Entry",
-                sle.name,
-                {
-                    "custom_length": item.custom_length,
-                    "custom_total_length": item.custom_total_length or (
-                        item.custom_length * item.qty if item.custom_length and item.qty else 0
-                    )
-                }
-            )
+    elif doc.doctype == "Purchase Receipt":
+        frappe.db.sql(
+            """
+            UPDATE `tabStock Ledger Entry` sle
+            INNER JOIN `tabPurchase Receipt Item` pri
+                ON pri.name = sle.voucher_detail_no AND pri.parent = sle.voucher_no
+            SET
+                sle.custom_length = IFNULL(pri.custom_length, 0),
+                sle.custom_total_length = IF(
+                    IFNULL(pri.custom_length, 0) != 0,
+                    IFNULL(pri.custom_length, 0) * sle.actual_qty,
+                    IFNULL(pri.custom_total_length, 0)
+                )
+            WHERE
+                sle.voucher_no = %s
+                AND sle.voucher_type = 'Purchase Receipt'
+                AND IFNULL(sle.is_cancelled, 0) = 0
+                AND (IFNULL(pri.custom_length, 0) != 0 OR IFNULL(pri.custom_total_length, 0) != 0)
+            """,
+            (doc.name,),
+        )
+
+
+def apply_custom_length_to_sle(doc):
+    """
+    Bulk-fix: set SLE lengths from voucher lines using SQL JOIN so each row gets
+    custom_total_length = custom_length × actual_qty (per SLE). Used after repost.
+    """
+    if doc.doctype not in ("Stock Entry", "Purchase Receipt") or doc.docstatus != 1:
+        return
+
+    if doc.doctype == "Stock Entry":
+        frappe.db.sql(
+            """
+            UPDATE `tabStock Ledger Entry` sle
+            INNER JOIN `tabStock Entry Detail` sed
+                ON sed.name = sle.voucher_detail_no AND sed.parent = sle.voucher_no
+            SET
+                sle.custom_length = IFNULL(sed.custom_length, 0),
+                sle.custom_total_length = IF(
+                    IFNULL(sed.custom_length, 0) != 0,
+                    IFNULL(sed.custom_length, 0) * sle.actual_qty,
+                    IFNULL(sed.custom_total_length, 0)
+                )
+            WHERE
+                sle.voucher_no = %s
+                AND sle.voucher_type = 'Stock Entry'
+                AND IFNULL(sle.is_cancelled, 0) = 0
+                AND (IFNULL(sed.custom_length, 0) != 0 OR IFNULL(sed.custom_total_length, 0) != 0)
+            """,
+            (doc.name,),
+        )
+    elif doc.doctype == "Purchase Receipt":
+        frappe.db.sql(
+            """
+            UPDATE `tabStock Ledger Entry` sle
+            INNER JOIN `tabPurchase Receipt Item` pri
+                ON pri.name = sle.voucher_detail_no AND pri.parent = sle.voucher_no
+            SET
+                sle.custom_length = IFNULL(pri.custom_length, 0),
+                sle.custom_total_length = IF(
+                    IFNULL(pri.custom_length, 0) != 0,
+                    IFNULL(pri.custom_length, 0) * sle.actual_qty,
+                    IFNULL(pri.custom_total_length, 0)
+                )
+            WHERE
+                sle.voucher_no = %s
+                AND sle.voucher_type = 'Purchase Receipt'
+                AND IFNULL(sle.is_cancelled, 0) = 0
+                AND (IFNULL(pri.custom_length, 0) != 0 OR IFNULL(pri.custom_total_length, 0) != 0)
+            """,
+            (doc.name,),
+        )
+
+
+def update_length_in_sle(doc, method=None):
+    """Backward-compatible name: bulk refresh from voucher (e.g. after repost)."""
+    apply_custom_length_to_sle(doc)
 
 def clear_length_in_sle(doc, method):
     """

@@ -24,6 +24,9 @@ def reserve_stock_physically(fg_selector_name):
 
 def reserve_stock_background(fg_selector_name, user):
     try:
+        # Ensure fresh DB connection (long-running context)
+        frappe.db.connect()
+        
         doc = frappe.get_doc("FG Raw Material Selector", fg_selector_name)
 
         if not doc.rm_oc_simulation:
@@ -38,7 +41,7 @@ def reserve_stock_background(fg_selector_name, user):
             )
             return
 
-        reserved_warehouse = doc.reserved_warehouse or "Reserved Stock - Sbs"
+        reserved_warehouse = doc.reserved_warehouse or "Reserve - Trial - Sbs"
         oc_warehouse = doc.offcut_warehouse or "OC - Trial - Sbs"
         rm_warehouse = doc.raw_material_warehouse or "RM - Trial - Sbs"
         company = doc.company or frappe.defaults.get_user_default("company")
@@ -55,6 +58,17 @@ def reserve_stock_background(fg_selector_name, user):
                 user=user
             )
             return
+
+        # Clean up any orphaned bundles from previous failed attempts
+        frappe.db.sql("""
+            DELETE sbb FROM `tabSerial and Batch Bundle` sbb
+            LEFT JOIN `tabStock Entry Detail` sed ON sed.serial_and_batch_bundle = sbb.name
+            WHERE sbb.voucher_type = 'Stock Entry'
+              AND sbb.type_of_transaction = 'Outward'
+              AND sed.name IS NULL
+              AND sbb.creation > DATE_SUB(NOW(), INTERVAL 1 HOUR)
+        """)
+        frappe.db.commit()
 
         # Collect all unique serial numbers
         serial_nos = set()
@@ -141,6 +155,8 @@ def reserve_stock_background(fg_selector_name, user):
             )
             return
 
+        # Reconnect before saving (ensure fresh connection after long processing)
+        frappe.db.connect()
         entry.save()
 
         # Fix for ERPNext v15+: If Serial and Batch Bundle is created, clear legacy serial_no field to avoid validation error on submit
@@ -150,13 +166,16 @@ def reserve_stock_background(fg_selector_name, user):
             SET serial_no='', batch_no='' 
             WHERE parent = %s AND serial_and_batch_bundle IS NOT NULL AND serial_and_batch_bundle != ''
         """, (entry.name,))
+        frappe.db.commit()
         
         # Clear document cache to ensure next get_doc fetches fresh data
         frappe.clear_document_cache("Stock Entry", entry.name)
         
-        # Re-fetch fresh document
+        # Re-fetch fresh document and reconnect before submit
+        frappe.db.connect()
         entry = frappe.get_doc("Stock Entry", entry.name)
         entry.submit()
+        frappe.db.commit()
 
         # Update raw_materials rows
         for row in doc.raw_materials:
@@ -179,14 +198,24 @@ def reserve_stock_background(fg_selector_name, user):
         )
 
     except Exception as e:
-        frappe.log_error("Stock Reservation Error", f"Error in background stock reservation: {str(e)}")
+        error_msg = str(e)
+        
+        # Try to log error with fresh connection
+        try:
+            frappe.db.connect()
+            frappe.log_error(
+                message=frappe.get_traceback(),
+                title=f"Stock Reservation Error - {fg_selector_name}"
+            )
+        except:
+            pass  # If logging fails, at least send notification
+        
         frappe.publish_realtime(
-            event='msgprint',
+            event='stock_reservation_done',
             message={
-                'message': f'Error reserving stock: {str(e)}',
-                'title': 'Stock Reservation Error',
-                'indicator': 'red',
-                'alert': True
+                'status': 'error',
+                'message': f'Stock reservation failed: {error_msg}',
+                'docname': fg_selector_name
             },
             user=user
         )
@@ -196,7 +225,7 @@ def return_unconsumed_reserved_stock(fg_selector_name):
     """Return unconsumed stock from Reserved warehouse back to default."""
     doc = frappe.get_doc("FG Raw Material Selector", fg_selector_name)
     # Use document's warehouses if set, otherwise use defaults
-    source_warehouse = getattr(doc, 'reserved_warehouse', None) or "Reserved Stock - Sbs"
+    source_warehouse = getattr(doc, 'reserved_warehouse', None) or "Reserve - Trial - Sbs"
     default_warehouse = getattr(doc, 'raw_material_warehouse', None) or "RM - Trial - Sbs"
     
     # Get company and cost_center from document
@@ -300,7 +329,7 @@ def return_unconsumed_reserved_stock(fg_selector_name):
 @frappe.whitelist()
 def get_available_qty(item_code, uom):
     """Return quantity of item excluding reserved warehouses."""
-    warehouses_to_exclude = ["Reserved Stock - Sbs"]
+    warehouses_to_exclude = ["Reserve - Trial - Sbs"]
     warehouses = frappe.get_all("Warehouse", filters={"is_group": 0}, pluck="name")
 
     total = 0
