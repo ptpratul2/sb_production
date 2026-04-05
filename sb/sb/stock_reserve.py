@@ -28,18 +28,9 @@ def reserve_stock_background(fg_selector_name, user):
         frappe.db.connect()
         
         doc = frappe.get_doc("FG Raw Material Selector", fg_selector_name)
-
-        if not doc.rm_oc_simulation:
-            frappe.publish_realtime(
-                event='msgprint',
-                message={
-                    'message': 'Please run RM/OC Calculation first to determine optimal reservations.',
-                    'indicator': 'red',
-                    'alert': True
-                },
-                user=user
-            )
-            return
+        from sb.sb.doctype.fg_raw_material_selector.fg_raw_material_selector import (
+            _allocate_rm_oc_pieces_for_reservation,
+        )
 
         reserved_warehouse = doc.reserved_warehouse or "Reserve - Trial - Sbs"
         oc_warehouse = doc.offcut_warehouse or "OC - Trial - Sbs"
@@ -70,19 +61,12 @@ def reserve_stock_background(fg_selector_name, user):
         """)
         frappe.db.commit()
 
-        # Collect all unique serial numbers
-        serial_nos = set()
-        piece_map = {}
+        # Reservation-only RM/OC allocation (does NOT write rm_oc_simulation rows)
+        serial_nos, piece_map, _ns_shortfalls = _allocate_rm_oc_pieces_for_reservation(doc)
 
-        for sim in doc.rm_oc_simulation:
-            if sim.open_stock_oc_reservation:
-                sn = sim.open_stock_oc_reservation
-                serial_nos.add(sn)
-                piece_map[sn] = {"source_type": "OC", "s_warehouse": oc_warehouse, "item_code": sim.rm_item_code}
-            elif sim.open_stock_rm_reservation:
-                sn = sim.open_stock_rm_reservation
-                serial_nos.add(sn)
-                piece_map[sn] = {"source_type": "RM", "s_warehouse": rm_warehouse, "item_code": sim.rm_item_code}
+        # Persist IS/NIS status updates even if reservation exits early.
+        doc.save(ignore_permissions=True)
+        frappe.db.commit()
 
         if not serial_nos:
             frappe.publish_realtime(
@@ -95,6 +79,16 @@ def reserve_stock_background(fg_selector_name, user):
                 user=user
             )
             return
+
+        # Safety: ensure piece_map warehouses align with doc configuration
+        # (We don't use `item_code` here, only `s_warehouse`.)
+        expected_oc_wh = oc_warehouse
+        expected_rm_wh = rm_warehouse
+        for sn, info in list(piece_map.items()):
+            if info.get("source_type") == "OC":
+                info["s_warehouse"] = expected_oc_wh
+            elif info.get("source_type") == "RM":
+                info["s_warehouse"] = expected_rm_wh
 
         # ONE QUERY — works on ALL Frappe v15 versions
         serial_details = frappe.db.sql("""

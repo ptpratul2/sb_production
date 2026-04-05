@@ -1464,6 +1464,196 @@ def fetch_pending_items(docname):
         frappe.throw(f"Failed to fetch pending items: {str(e)}")
 
 
+def _allocate_rm_oc_pieces_for_reservation(doc):
+    """
+    Reservation-only RM/OC allocation.
+
+    Runs the same allocation logic as `_run_rm_oc_calculation`, but:
+    - does NOT write to the `rm_oc_simulation` child table (avoids 20k+ DB rows)
+    - only returns the set of OC/RM Serial No pieces that must be reserved
+    - updates `doc.raw_materials[*].status` to IS/NIS based on whether any cut
+      could not be allocated (same meaning as NS rows in simulation mode).
+    """
+
+    oc_warehouse = doc.offcut_warehouse or "OC - Trial - Sbs"
+    rm_warehouse = doc.raw_material_warehouse or "RM - Trial - Sbs"
+    min_oc_length_mm = 200  # if balance < this, it is treated as scrap (only affects expected stock in simulation)
+
+    if not hasattr(doc, "raw_materials"):
+        frappe.throw("Document is missing child table 'raw_materials'")
+
+    # STEP 1: Collect all cuts item-wise + total qty for each (FG, RM)
+    cuts_by_item = {}
+    total_qty_map = {}  # key: (fg, rm_item, length) -> total qty
+
+    for row in doc.raw_materials:
+        if not row.item_code or not row.dimension or not row.quantity:
+            continue
+
+        fg_code = row.fg_code or ""
+        rm_item = row.item_code
+        qty = cint(row.quantity)
+
+        required_lengths = [
+            flt(v.strip())
+            for v in (row.dimension or "").split(",")
+            if v.strip() and v.strip() != "-"
+        ]
+
+        for length in required_lengths:
+            key = (fg_code, rm_item, length)
+            total_qty_map[key] = total_qty_map.get(key, 0) + qty
+
+    for (fg_code, rm_item, cut_length), total_qty in total_qty_map.items():
+        cuts_by_item.setdefault(rm_item, [])
+        for _ in range(total_qty):
+            cuts_by_item[rm_item].append(
+                {
+                    "fg_code": fg_code,
+                    "rm_item_code": rm_item,
+                    "length": cut_length,
+                }
+            )
+
+    if not cuts_by_item:
+        frappe.throw("No valid raw materials found on this document")
+
+    reserved_serial_nos = set()
+    # serial_no -> {s_warehouse, source_type}
+    piece_map = {}
+    fg_has_ns = set()
+    # rm_item_code -> {cut_length_mm -> qty_of_rm}
+    ns_length_qty = defaultdict(lambda: defaultdict(int))
+    # rm_item_code -> set(fg_code)
+    ns_fg_links = defaultdict(set)
+
+    def assign_from_single_piece_no_save(piece_dict, cuts_list, source_type: str):
+        """
+        Allocate from one OC/RM Serial No piece to as many cuts as fit.
+        Mutates `cuts_list` in-place (pops allocated cuts).
+        """
+
+        remaining_length = flt(piece_dict.get("current_length_mm") or 0)
+        allocated_any = False
+
+        # cuts_list expected sorted by length DESC
+        while True:
+            candidate_index = None
+
+            for idx, cut in enumerate(cuts_list):
+                required_len = flt(cut["length"])
+
+                # Apply tolerance only for the first cut allocated to this piece (RM mode)
+                if source_type == "RM" and not allocated_any:
+                    required_len += 4
+
+                if required_len <= remaining_length:
+                    candidate_index = idx
+                    break
+
+            if candidate_index is None:
+                break  # no more cuts fit in this piece
+
+            cut = cuts_list.pop(candidate_index)
+
+            consumed_len = flt(cut["length"])
+            if source_type == "RM" and not allocated_any:
+                consumed_len += 4
+
+            remaining_length = remaining_length - consumed_len
+
+            # First successful allocation for this piece => piece must be reserved
+            if not allocated_any:
+                allocated_any = True
+                sn = piece_dict["name"]
+                reserved_serial_nos.add(sn)
+                piece_map[sn] = {
+                    "source_type": source_type,
+                    "s_warehouse": oc_warehouse if source_type == "OC" else rm_warehouse,
+                    "item_code": cut.get("rm_item_code"),
+                }
+
+        piece_dict["current_length_mm"] = remaining_length
+
+    # STEP 2: Process each RM item independently
+    for rm_item, cuts in cuts_by_item.items():
+        if not cuts:
+            continue
+
+        # Sort cuts by length DESC so each piece uses largest cuts first
+        cuts.sort(key=lambda x: x["length"], reverse=True)
+
+        # Load OC pieces of this RM item from OC warehouse, shortest first
+        oc_pieces = frappe.get_all(
+            "Serial No",
+            filters={
+                "item_code": rm_item,
+                "warehouse": oc_warehouse,
+                "custom_length": [">", 0],
+            },
+            fields=["serial_no as name", "custom_length as current_length_mm"],
+        )
+        oc_pieces.sort(key=lambda x: flt(x.get("current_length_mm") or 0))
+
+        # Load RM pieces of this RM item from RM warehouse, shortest first
+        rm_pieces = frappe.get_all(
+            "Serial No",
+            filters={
+                "item_code": rm_item,
+                "warehouse": rm_warehouse,
+                "custom_length": [">", 0],
+            },
+            fields=["serial_no as name", "custom_length as current_length_mm"],
+        )
+        rm_pieces.sort(key=lambda x: flt(x.get("current_length_mm") or 0))
+
+        # FIRST: Allocate from OC pieces (shortest first)
+        for oc in oc_pieces:
+            if not cuts:
+                break
+            assign_from_single_piece_no_save(oc, cuts, "OC")
+
+        # SECOND: Allocate remaining cuts from RM pieces (shortest first)
+        for bar in rm_pieces:
+            if not cuts:
+                break
+            assign_from_single_piece_no_save(bar, cuts, "RM")
+
+        # THIRD: Anything remaining is NOT IN STOCK (NS)
+        # Any remaining cut => its FG must be marked NIS
+        if cuts:
+            for cut in cuts:
+                fg_has_ns.add(cut["fg_code"])
+                ns_length_qty[rm_item][flt(cut["length"])] += 1
+                ns_fg_links[rm_item].add(cut["fg_code"])
+
+    # STEP 3: Update status in raw_materials based on allocation.
+    # Primary key is FG code, with item-code fallback in case FG mapping is
+    # incomplete/inconsistent for some generated rows.
+    ns_item_codes = set(ns_length_qty.keys())
+    for raw_row in doc.raw_materials:
+        fg_code = (raw_row.fg_code or "").strip()
+        item_code = (raw_row.item_code or "").strip()
+        raw_row.status = "NIS" if (fg_code in fg_has_ns or item_code in ns_item_codes) else "IS"
+
+    # Keep `min_oc_length_mm` referenced so it won't look unused during linting
+    _ = min_oc_length_mm
+
+    # Build NS shortfall details for Material Request creation:
+    # rm_item_code -> {"details":[(length,qty)], "fg_links":[...]}
+    ns_shortfalls = {}
+    for rm_item_code, length_map in ns_length_qty.items():
+        details = [(length, qty) for length, qty in length_map.items() if length > 0 and qty > 0]
+        details.sort(key=lambda x: x[0], reverse=True)
+        ns_shortfalls[rm_item_code] = {
+            "details": details,
+            "fg_links": sorted(ns_fg_links.get(rm_item_code, set())),
+        }
+
+    # Return serial numbers to reserve + warehouse mapping + NS shortfalls
+    return reserved_serial_nos, piece_map, ns_shortfalls
+
+
 def _run_rm_oc_calculation(fg_selector_name: str) -> str:
     """
     Run RM / OC calculator (sync). Used by background worker for large datasets
@@ -1480,6 +1670,15 @@ def _run_rm_oc_calculation(fg_selector_name: str) -> str:
 
     if not hasattr(doc, "raw_materials"):
         frappe.throw("Document is missing child table 'raw_materials'")
+
+    # After removing the `rm_oc_simulation` table field from this DocType,
+    # fall back to reservation-only allocation (no simulation rows are saved).
+    if not hasattr(doc, "rm_oc_simulation"):
+        _reserved_serial_nos, _piece_map, _ns_shortfalls = _allocate_rm_oc_pieces_for_reservation(doc)
+        frappe.db.connect()
+        doc.save(ignore_permissions=True)
+        frappe.db.commit()
+        return f"RM / OC calculation completed for FG Raw Material Selector {fg_selector_name} (no simulation table saved)"
 
     # STEP 1: Collect all cuts item-wise + total qty for each (FG, RM)
     cuts_by_item = {}

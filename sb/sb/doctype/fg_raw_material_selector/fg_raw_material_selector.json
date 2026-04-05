@@ -23,8 +23,6 @@
   "raw_materials",
   "raw_materials_item",
   "raw_materials_display",
-  "section_break_simulation",
-  "rm_oc_simulation",
   "amended_from"
  ],
  "fields": [
@@ -33,17 +31,6 @@
    "fieldtype": "Table",
    "label": "Raw Materials",
    "options": "FG Raw Material Item"
-  },
-  {
-   "fieldname": "section_break_simulation",
-   "fieldtype": "Section Break",
-   "label": "RM OC Simulation"
-  },
-  {
-   "fieldname": "rm_oc_simulation",
-   "fieldtype": "Table",
-   "label": "RM OC Simulation",
-   "options": "RM OC Simulation"
   },
   {
    "fieldname": "project",

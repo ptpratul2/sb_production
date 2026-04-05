@@ -156,50 +156,15 @@ frappe.ui.form.on('FG Raw Material Selector', {
             }, __('Actions')).addClass('btn-secondary');
 
         }
-        // ----- Button: Calculate RM/OC Usage -----
-        if (!frm.is_new() && frm.doc.docstatus === 0 && frm.doc.status === "In Progress") {
-            frm.add_custom_button(__('Calculate RM/OC Usage'), function () {
-                frappe.call({
-                    method: 'sb.sb.doctype.fg_raw_material_selector.fg_raw_material_selector.rm_oc_calculator',
-                    args: {
-                        fg_selector_name: frm.doc.name
-                    },
-                    freeze: true,
-                    freeze_message: __('Queueing RM/OC calculation (runs in background)...'),
-                    callback: function (r) {
-                        if (r.exc) {
-                            return;
-                        }
-                        if (!r.message) {
-                            return;
-                        }
-                        if (typeof r.message === 'object' && r.message.status === 'queued') {
-                            frappe.show_alert({
-                                message: r.message.message,
-                                indicator: 'blue'
-                            });
-                            return;
-                        }
-                        if (typeof r.message === 'string') {
-                            frappe.show_alert({
-                                message: r.message,
-                                indicator: 'green'
-                            });
-                            frm.reload_doc();
-                        }
-                    }
-                });
-            }, __('Actions')).addClass('btn-primary');
-        }
-        // ===== ADD THIS INSIDE refresh: function(frm) { ... } =====
+        // RM/OC simulation table removed; reserve flow does the calculation in background.
 
         // Button: Reserve Stock Physically (only after RM/OC calculation)
         if (
             !frm.is_new() &&
             frm.doc.docstatus === 0 &&
             ["In Progress", "Submitted"].includes(frm.doc.status) &&
-            frm.doc.rm_oc_simulation &&
-            frm.doc.rm_oc_simulation.length > 0
+            frm.doc.raw_materials &&
+            frm.doc.raw_materials.length > 0
         ) {
             // Disable button if a reservation already exists
             let already_reserved = frm.doc.raw_materials.some(row => row.reserve_tag === 1 && row.stock_entry);

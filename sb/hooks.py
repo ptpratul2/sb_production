@@ -160,6 +160,7 @@ override_doctype_class = {
 doc_events = {
     # Bulk length update after all SLEs created (1 SQL UPDATE per voucher, not per SLE row)
     "Stock Entry": {
+        "before_submit": "sb.sb.stock_hooks.clear_serial_batch_legacy_fields_before_submit",
         "on_submit": "sb.sb.stock_hooks.sync_sle_length_after_submit",
         "on_cancel": [
             "sb.sb.stock_hooks.clear_length_in_sle",

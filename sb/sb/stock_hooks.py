@@ -2,6 +2,23 @@ import frappe
 from frappe.utils import cint, flt
 
 
+def clear_serial_batch_legacy_fields_before_submit(doc, method):
+    """
+    ERPNext v15+: rows can have both serial_and_batch_bundle and legacy serial_no / batch_no.
+    On submit, make_bundle_using_old_serial_batch_fields validates that they match the bundle;
+    any mismatch raises "Serial and Batch Bundle ... has already created. Please remove..."
+    Once the bundle exists it is authoritative — clear the legacy fields (same as desk message).
+    """
+    if doc.doctype != "Stock Entry":
+        return
+    for row in doc.get("items") or []:
+        if not row.serial_and_batch_bundle:
+            continue
+        if row.serial_no or row.batch_no:
+            row.serial_no = ""
+            row.batch_no = ""
+
+
 def sync_sle_length_after_submit(doc, method):
     """
     Stock Entry / Purchase Receipt on_submit — runs after ERPNext creates all SLEs.
@@ -213,52 +230,130 @@ def update_serial_no_length(doc, method):
 
 
 @frappe.whitelist()
+def get_ns_mr_shortfall_preview(fg_selector_name):
+    """
+    Preview NS (not-in-stock) shortfalls for the MR dialog without requiring rm_oc_simulation.
+    Uses the same allocator as Reserve Stock / create_material_request_for_shortfall.
+    Does not save the FG Raw Material Selector (preview only).
+
+    Returns readable breakdown: per cut length, total mm, suggested bar qty (4820 mm bars),
+    same basis as Material Request creation.
+    """
+    import math
+
+    if not fg_selector_name:
+        frappe.throw("FG Raw Material Selector is required")
+
+    doc = frappe.get_doc("FG Raw Material Selector", fg_selector_name)
+    from sb.sb.doctype.fg_raw_material_selector.fg_raw_material_selector import (
+        _allocate_rm_oc_pieces_for_reservation,
+    )
+
+    _serial_nos, _piece_map, ns_shortfalls = _allocate_rm_oc_pieces_for_reservation(doc)
+
+    if not ns_shortfalls:
+        return {"empty": True, "items": [], "total_ns_pieces": 0, "distinct_rm": 0}
+
+    std_bar_mm = 4820.0
+    items = []
+    total_ns_pieces = 0
+    grand_total_length_mm = 0.0
+
+    for item_code in sorted(ns_shortfalls.keys()):
+        ns = ns_shortfalls[item_code]
+        details = [(flt(l), int(q)) for l, q in (ns.get("details") or []) if flt(l) > 0 and int(q) > 0]
+        details.sort(key=lambda x: x[0], reverse=True)
+        fg_links = ns.get("fg_links") or []
+
+        piece_count = sum(q for _, q in details)
+        total_ns_pieces += piece_count
+
+        total_length_mm = sum(l * q for l, q in details)
+        grand_total_length_mm += total_length_mm
+
+        if total_length_mm > 0:
+            suggested_bar_qty = int(math.ceil(total_length_mm / std_bar_mm))
+        else:
+            suggested_bar_qty = max(1, piece_count)
+
+        length_rows = []
+        for length_mm, qty in details:
+            length_rows.append(
+                {
+                    "length_mm": length_mm,
+                    "qty": qty,
+                    "line_mm": flt(length_mm * qty),
+                }
+            )
+
+        item_name = frappe.db.get_value("Item", item_code, "item_name") or ""
+
+        items.append(
+            {
+                "item_code": item_code,
+                "item_name": item_name,
+                "pieces": piece_count,
+                "total_length_mm": flt(total_length_mm),
+                "suggested_bar_qty": suggested_bar_qty,
+                "std_bar_mm": std_bar_mm,
+                "length_rows": length_rows,
+                "fg_codes": sorted(fg_links),
+                "fg_codes_display": ", ".join(sorted(fg_links)) if fg_links else "",
+            }
+        )
+
+    return {
+        "empty": False,
+        "fg_raw_material_selector": doc.name,
+        "items": items,
+        "total_ns_pieces": total_ns_pieces,
+        "distinct_rm": len(items),
+        "grand_total_length_mm": flt(grand_total_length_mm),
+        "std_bar_mm": std_bar_mm,
+    }
+
+
+@frappe.whitelist()
 def create_material_request_for_shortfall(fg_selector_name):
     from collections import defaultdict   # ← Safe fallback if import above is missing
 
     try:
         doc = frappe.get_doc("FG Raw Material Selector", fg_selector_name)
+        from sb.sb.doctype.fg_raw_material_selector.fg_raw_material_selector import (
+            _allocate_rm_oc_pieces_for_reservation,
+        )
 
-        # Collect NS rows (ns_flag = 1) from rm_oc_simulation
-        shortfalls = defaultdict(list)
-        fg_links = defaultdict(set)
+        # Reservation-only allocation (no rm_oc_simulation writes)
+        _serial_nos, _piece_map, ns_shortfalls = _allocate_rm_oc_pieces_for_reservation(doc)
 
-        for row in doc.rm_oc_simulation or []:
-            if cint(row.ns_flag) == 1:  # This is NS (Not in Stock)
-                item_code = row.rm_item_code
-                # Each row in rm_oc_simulation represents ONE physical piece (expanded view)
-                row_qty = flt(row.qty_of_rm) 
-                
-                # Extract length from cutting_code (e.g., "C-125-1250" -> 1250)
-                try:
-                    if row.cutting_code:
-                        length = flt(row.cutting_code.split('-')[-1])
-                    else:
-                        length = 0
-                except:
-                    length = 0
-                
-                shortfalls[item_code].append((length, row_qty))
-                
-                if row.fg_code:
-                    fg_links[item_code].add(row.fg_code)
-
-        if not shortfalls:
+        # ns_shortfalls: rm_item_code -> {"details":[(length, qty)], "fg_links":[...]}
+        if not ns_shortfalls:
             return "No NS shortfalls to request."
+
+        # Persist IS/NIS on raw_materials (same as reservation flow)
+        doc.save(ignore_permissions=True)
+        frappe.db.commit()
 
         # Create Material Request
         mr = frappe.new_doc("Material Request")
         mr.material_request_type = "Purchase"
         mr.transaction_date = frappe.utils.today()
         mr.company = doc.company
-        mr.fg_raw_material_selector = doc.name  # Optional reference
+        if frappe.db.exists(
+            "Custom Field",
+            {"dt": "Material Request", "fieldname": "fg_raw_material_selector"},
+        ):
+            mr.fg_raw_material_selector = doc.name
 
         # Get warehouse from doc or default
         warehouse = doc.raw_material_warehouse or "RM - Trial - Sbs"
 
         import math
 
-        for item_code, details in shortfalls.items():
+        for item_code, ns in ns_shortfalls.items():
+            details = ns.get("details") or []
+            fg_links = ns.get("fg_links") or []
+
             # details is list of (length, qty) tuples
             total_length = sum(l * q for l, q in details)
             total_pieces = sum(q for l, q in details)
@@ -272,7 +367,7 @@ def create_material_request_for_shortfall(fg_selector_name):
                 qty = max(1, math.ceil(total_pieces))
                 qty_description = f"Required Qty: {qty} (Length unknown, defaulted to piece count)"
 
-            linked_fgs = ", ".join(sorted(fg_links[item_code])) if fg_links[item_code] else "Multiple"
+            linked_fgs = ", ".join(sorted(fg_links)) if fg_links else "Multiple"
             # Show individual lengths in description (only unique lengths to avoid spam?)
             # Or show all? Let's show unique lengths with counts if possible, or just list
             # User asked for "length" field to show length.

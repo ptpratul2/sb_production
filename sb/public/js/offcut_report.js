@@ -1,3 +1,140 @@
+/** Format millimetre numbers for display (no decimals for readability). */
+function fmt_mm(val) {
+    if (val == null || val === "") {
+        return "—";
+    }
+    const n = Math.round(flt(val));
+    return n.toLocaleString("en-IN");
+}
+
+/**
+ * Builds HTML for the NS shortfall preview (before Material Request).
+ * Same numbers as the MR (4820 mm bars, cut breakdown by length).
+ */
+function build_ns_shortfall_report_html(p) {
+    const esc = (s) => frappe.utils.escape_html(s == null ? "" : String(s));
+    const std_bar = cint(p.std_bar_mm) || 4820;
+
+    const intro = `
+        <div class="alert alert-info" style="margin-bottom:16px;border-radius:0px;">
+            <p style="margin:0 0 8px 0;font-size:13px;line-height:1.5;">
+                ${__(
+                    "These are cuts that could not be covered from offcut (OC) and raw material (RM) stock. "
+                )}
+                <strong>${__("Suggested bar quantity")}</strong>
+                ${__(" uses the same rule as the Material Request: total required length ÷ ")}${std_bar}${__(
+                    " mm bar length, rounded up."
+                )}
+            </p>
+            <p style="margin:0;font-size:12px;color:var(--text-muted);">
+                ${__("FG Raw Material Selector")}: <strong>${esc(p.fg_raw_material_selector || "")}</strong>
+            </p>
+        </div>`;
+
+    const kpi_box = (label, value) => `
+        <div class="col-sm-4" style="margin-bottom:10px;">
+            <div style="padding:12px 14px;border-radius:0px;border:1px solid var(--border-color);background:var(--control-bg);">
+                <div class="text-muted small">${label}</div>
+                <div style="font-size:22px;font-weight:600;">${value}</div>
+            </div>
+        </div>`;
+
+    const summary = `
+        <div class="row" style="margin-bottom:16px;">
+            ${kpi_box(__("Uncovered cuts (total)"), cint(p.total_ns_pieces))}
+            ${kpi_box(__("Raw materials affected"), cint(p.distinct_rm))}
+            ${kpi_box(__("Total length to cover (all items)"), `${fmt_mm(p.grand_total_length_mm)} mm`)}
+        </div>`;
+
+    const item_blocks = (p.items || [])
+        .map((row) => {
+            const name_line = row.item_name
+                ? `<div class="small text-muted" style="margin-top:2px;">${esc(row.item_name)}</div>`
+                : "";
+
+            const length_table_rows = (row.length_rows || [])
+                .map(
+                    (lr) =>
+                        `<tr>
+                            <td class="text-right">${fmt_mm(lr.length_mm)}</td>
+                            <td class="text-right">${cint(lr.qty)}</td>
+                            <td class="text-right">${fmt_mm(lr.line_mm)}</td>
+                        </tr>`
+                )
+                .join("");
+
+            const length_table =
+                (row.length_rows || []).length > 0
+                    ? `
+                <table class="table table-bordered table-sm" style="margin:10px 0;font-size:13px;">
+                    <thead>
+                        <tr>
+                            <th class="text-right">${__("Cut length (mm)")}</th>
+                            <th class="text-right">${__("Cuts (qty)")}</th>
+                            <th class="text-right">${__("Length (mm)")}</th>
+                        </tr>
+                    </thead>
+                    <tbody>${length_table_rows}</tbody>
+                    <tfoot>
+                        <tr>
+                            <td colspan="2" class="text-right"><strong>${__("Subtotal")}</strong></td>
+                            <td class="text-right"><strong>${fmt_mm(row.total_length_mm)} mm</strong></td>
+                        </tr>
+                    </tfoot>
+                </table>`
+                    : `<p class="text-muted small">${__("No length breakdown.")}</p>`;
+
+            const fg_block = row.fg_codes_display
+                ? `<div style="margin-top:8px;font-size:12px;">
+                    <span class="text-muted">${__("Finished goods affected")}:</span>
+                    <span>${esc(row.fg_codes_display)}</span>
+                   </div>`
+                : "";
+
+            return `
+                <div style="margin-bottom:14px;border-radius:0px;border:1px solid var(--border-color);border-left:4px solid var(--primary);background:var(--control-bg);">
+                    <div style="padding:14px 16px;">
+                        <div class="row">
+                            <div class="col-sm-4">
+                                <div style="font-size:15px;font-weight:600;">${esc(row.item_code)}</div>
+                                ${name_line}
+                                <div class="small text-muted" style="margin-top:8px;">
+                                    ${__("Uncovered cuts")}: <strong>${cint(row.pieces)}</strong>
+                                </div>
+                            </div>
+                            <div class="col-sm-4">
+                                <div class="small text-muted">${__("Total length required")}</div>
+                                <div style="font-size:18px;font-weight:600;">${fmt_mm(row.total_length_mm)} mm</div>
+                            </div>
+                            <div class="col-sm-4">
+                                <div class="small text-muted">${__("Suggested purchase qty (bars)")}</div>
+                                <div style="font-size:18px;font-weight:600;color:var(--primary);">
+                                    ${cint(row.suggested_bar_qty)} ${__("×")} ${std_bar} mm
+                                </div>
+                            </div>
+                        </div>
+                        ${length_table}
+                        ${fg_block}
+                    </div>
+                </div>`;
+        })
+        .join("");
+
+    const scroll_wrap = `
+        <div style="max-height:min(60vh,520px);overflow-y:auto;padding-right:4px;">
+            ${item_blocks}
+        </div>`;
+
+    const footer_note = `
+        <p class="text-muted small" style="margin: 0 0 0 0; padding-top: 0px;">
+            ${__(
+                "Review the figures above, then click Create Material Request to generate a draft purchase request with the same quantities."
+            )}
+        </p>`;
+
+    return `<div class="sb-ns-shortfall-report">${intro}${summary}${scroll_wrap}${footer_note}</div>`;
+}
+
 frappe.ui.form.on("FG Raw Material Selector", {
     refresh: function (frm) {
         // Prevent adding buttons multiple times
@@ -8,96 +145,71 @@ frappe.ui.form.on("FG Raw Material Selector", {
         frm.page.add_inner_button(__("Offcut Report"), () => generate_offcut_report(frm), __("FG Reports"));
         frm.page.add_inner_button(__("Cutting Plan Generator"), () => open_cutting_plan_generator(frm), __("FG Reports"));
 
-        // ────────────────────── Create Material Request Button ──────────────────────
+        // ────────────────────── Create Material Request (NIS / NS shortfall) ──────────────────────
+        // Uses server-side RM/OC allocation (same as reservation), not removed rm_oc_simulation table.
         frm.add_custom_button(__("Create Material Request"), function () {
-            // Make sure simulation table exists
-            if (!frm.doc.rm_oc_simulation || frm.doc.rm_oc_simulation.length === 0) {
-                frappe.msgprint({
-                    title: __("Missing Data"),
-                    message: __("Please run <strong>Calculate RM/OC Usage</strong> first."),
-                    indicator: "orange"
-                });
-                return;
-            }
+            frappe.call({
+                method: "sb.sb.stock_hooks.get_ns_mr_shortfall_preview",
+                args: { fg_selector_name: frm.doc.name },
+                freeze: true,
+                freeze_message: __("Computing shortfall…"),
+                callback: function (r) {
+                    const p = r.message;
+                    if (!p || p.empty) {
+                        frappe.msgprint({
+                            title: __("No Shortfall"),
+                            message: __(
+                                "All cuts are covered by OC/RM stock, or no valid raw material lines. No Material Request needed."
+                            ),
+                            indicator: "blue"
+                        });
+                        return;
+                    }
 
-            // Find all NS (Not in Stock) rows → ns_flag = 1
-            let ns_rows = frm.doc.rm_oc_simulation.filter(row => cint(row.ns_flag) === 1);
+                    const report_html = build_ns_shortfall_report_html(p);
 
-            if (ns_rows.length === 0) {
-                frappe.msgprint({
-                    title: __("No Shortfall"),
-                    message: __("All items are covered by stock. No Material Request needed."),
-                    indicator: "blue"
-                });
-                return;
-            }
-
-            // Consolidate by item code
-            let items = {};
-            ns_rows.forEach(row => {
-                let code = row.rm_item_code;
-                if (!items[code]) {
-                    items[code] = { qty: 0, fg_codes: new Set() };
-                }
-                items[code].qty += 1;                     // each row = 1 full bar
-                if (row.fg_code) items[code].fg_codes.add(row.fg_code);
-            });
-
-            // Build nice HTML table
-            let rows_html = Object.keys(items).map(code => {
-                let i = items[code];
-                return `<tr>
-                    <td>${code}</td>
-                    <td>${i.qty}</td>
-                    <td>${Array.from(i.fg_codes).join(", ")}</td>
-                </tr>`;
-            }).join("");
-
-            let table = `
-                <table class="table table-bordered table-sm">
-                    <thead class="thead-light">
-                        <tr>
-                            <th>${__("Item Code")}</th>
-                            <th>${__("Required Qty (Nos)")}</th>
-                            <th>${__("Linked FG Codes")}</th>
-                        </tr>
-                    </thead>
-                    <tbody>${rows_html}</tbody>
-                </table>`;
-
-            // Show confirmation dialog
-            let d = new frappe.ui.Dialog({
-                title: __("Create Material Request for NS Items"),
-                fields: [{
-                    fieldtype: "HTML",
-                    options: `
-                        <p><b>${__("Total NS pieces")}:</b> ${ns_rows.length}</p>
-                        <p><b>${__("Distinct raw materials")}:</b> ${Object.keys(items).length}</p>
-                        ${table}
-                    `
-                }],
-                primary_action_label: __("Create Material Request"),
-                primary_action: function () {
-                    d.hide();
-                    frappe.call({
-                        method: "sb.sb.stock_hooks.create_material_request_for_shortfall",
-                        args: { fg_selector_name: frm.doc.name },
-                        freeze: true,
-                        freeze_message: __("Creating Material Request…"),
-                        callback: function (r) {
-                            if (r.message && r.message !== "No NS shortfalls to request.") {
-                                frappe.show_alert({
-                                    message: __("Material Request {0} created", [r.message.link(r.message)]),
-                                    indicator: "green"
-                                });
-                            } else {
-                                frappe.msgprint(__("No shortfall items found."));
+                    const d = new frappe.ui.Dialog({
+                        title: __("Shortfall summary — review before Material Request"),
+                        size: "extra-large",
+                        fields: [
+                            {
+                                fieldtype: "HTML",
+                                options: report_html
                             }
+                        ],
+                        primary_action_label: __("Create Material Request"),
+                        primary_action: function () {
+                            d.hide();
+                            frappe.call({
+                                method: "sb.sb.stock_hooks.create_material_request_for_shortfall",
+                                args: { fg_selector_name: frm.doc.name },
+                                freeze: true,
+                                freeze_message: __("Creating Material Request…"),
+                                callback: function (cr) {
+                                    if (
+                                        cr.message &&
+                                        cr.message !== "No NS shortfalls to request."
+                                    ) {
+                                        const link = frappe.utils.get_form_link(
+                                            "Material Request",
+                                            cr.message,
+                                            true
+                                        );
+                                        frappe.show_alert({
+                                            message: __("Material Request {0} created", [link]),
+                                            indicator: "green"
+                                        });
+                                        frm.reload_doc();
+                                    } else {
+                                        frappe.msgprint(__("No shortfall items found."));
+                                    }
+                                }
+                            });
                         }
                     });
+                    d.show();
                 }
             });
-            d.show();
         }, __("Actions")).addClass("btn-primary");
     }
 });
