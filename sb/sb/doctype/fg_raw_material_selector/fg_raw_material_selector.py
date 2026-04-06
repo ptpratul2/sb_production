@@ -44,11 +44,6 @@ class FGRawMaterialSelector(Document):
     
     def validate(self):
         """Validate FG Raw Material Selector"""
-        frappe.log_error(
-            message=f"Validating FG Raw Material Selector: {self.name}",
-            title="FG Validation Debug"
-        )
-        
         # Set planning date if not set
         if not self.planning_date:
             self.planning_date = frappe.utils.today()
@@ -76,7 +71,7 @@ class FGRawMaterialSelector(Document):
                         alert=True
                     )
             except Exception as e:
-                frappe.log_error(f"Error validating quantity for row {item.idx}: {str(e)}", "FG Quantity Validation")
+                pass  # Skip validation errors for individual rows
     
     def on_submit(self):
         """Update processed quantities in Planning BOM on submission"""
@@ -309,17 +304,8 @@ class FGRawMaterialSelector(Document):
 
     def process_fg_codes(self):
         try:
-            frappe.log_error(
-                message=f"Starting process_fg_codes for document: {self.name}",
-                title="FG Process Debug"
-            )
-
             # Collect Planning BOM names from planning_bom child table
             pbom_names = [row.get("planning_bom") for row in self.planning_bom if row.get("planning_bom")]
-            frappe.log_error(
-                message=f"Processing Planning BOMs: {json.dumps(pbom_names, indent=2)}",
-                title="FG Process Debug"
-            )
 
             # if not self.planning_bom or not isinstance(self.planning_bom, list):
             #     frappe.log_error(
@@ -351,23 +337,11 @@ class FGRawMaterialSelector(Document):
             for pbom_entry in self.planning_bom:
                 pbom_name = pbom_entry.get("planning_bom")
                 if not pbom_name or not isinstance(pbom_name, str):
-                    frappe.log_error(
-                        message=f"Invalid Planning BOM name: {pbom_name}",
-                        title="FG Raw Material Error"
-                    )
                     continue
 
                 try:
                     pbom_doc = frappe.get_doc("Planning BOM", pbom_name)
-                    frappe.log_error(
-                        message=f"Fetched Planning BOM: {pbom_name}",
-                        title="FG Process Debug"
-                    )
                 except frappe.DoesNotExistError:
-                    frappe.log_error(
-                        message=f"Planning BOM {pbom_name} not found",
-                        title="FG Raw Material Error"
-                    )
                     continue
 
                 pbom_project = pbom_doc.get("project")
@@ -388,32 +362,17 @@ class FGRawMaterialSelector(Document):
                         "u_area": fg.get("u_area")
                     } for fg in pbom_items
                 ]
-                frappe.log_error(
-                    message=f"FG Codes for PBOM {pbom_name}: {json.dumps(pbom_items_serializable, indent=2)}",
-                    title="FG Process Debug"
-                )
 
                 if not pbom_items:
                     frappe.msgprint(f"No FG Components found for Planning BOM: {pbom_name}")
-                    frappe.log_error(
-                        message=f"No FG Components found for Planning BOM: {pbom_name}",
-                        title="FG Raw Material Error"
-                    )
                     continue
 
                 fg_codes_all.extend([(fg_component, pbom_project, pbom_name) for fg_component in pbom_items])
 
             if fg_codes_all:
                 self.raw_materials = []
-                frappe.log_error(
-                    message="Cleared existing raw_materials table.",
-                    title="FG Process Debug"
-                )
             else:
-                frappe.log_error(
-                    message="No FG codes to process. Skipping raw_materials clear.",
-                    title="FG Process Debug"
-                )
+                pass  # No codes to process
 
             # Process in batches
             for i in range(0, len(fg_codes_all), batch_size):
@@ -433,10 +392,6 @@ class FGRawMaterialSelector(Document):
                     planning_bom_item_reference = fg_component.get("name")
 
                     if not fg_code or not isinstance(fg_code, str):
-                        frappe.log_error(
-                            message=f"Invalid FG Code in PBOM: {pbom_name}, FG Code: {fg_code}",
-                            title="FG Raw Material Error"
-                        )
                         continue
 
                     # Clean FG code by removing (GD) from code part
@@ -447,39 +402,19 @@ class FGRawMaterialSelector(Document):
 
                     parts = fg_code.split('|')
                     if len(parts) != 5 or parts[2] not in valid_fg_codes:
-                        frappe.log_error(
-                            message=f"Skipping invalid FG Code: {fg_code} in PBOM: {pbom_name}",
-                            title="FG Raw Material Error"
-                        )
                         continue
 
                     try:
                         # Process with tolerance (add_tolerance=True) for both RM and child parts
                         raw_materials = self.process_single_fg_code(fg_code, add_tolerance=True)
-                        frappe.log_error(
-                            message=f"Processed FG Code {fg_code}: {json.dumps(raw_materials, indent=2)}",
-                            title="FG Process Debug"
-                        )
                         if not isinstance(raw_materials, list):
-                            frappe.log_error(
-                                message=f"Invalid data for FG Code '{fg_code}': {raw_materials}",
-                                title="FG Raw Material Error"
-                            )
                             continue
                     except Exception as e:
-                        frappe.log_error(
-                            message=f"Error processing FG Code '{fg_code}' in PBOM {pbom_name}: {str(e)}",
-                            title="FG Raw Material Error"
-                        )
                         continue
 
                     rm_table = []
                     for rm in raw_materials:
                         if not isinstance(rm, dict):
-                            frappe.log_error(
-                                message=f"Invalid raw material for FG Code '{fg_code}': {rm}",
-                                title="FG Raw Material Error"
-                            )
                             continue
 
                         rm_quantity = rm.get("quantity", 1) * component_quantity
@@ -511,15 +446,7 @@ class FGRawMaterialSelector(Document):
 
                         try:
                             self.append("raw_materials", rm_entry)
-                            frappe.log_error(
-                                message=f"Appended raw material for FG Code '{fg_code}': {json.dumps(rm_entry, indent=2)}",
-                                title="FG Process Debug"
-                            )
                         except Exception as e:
-                            frappe.log_error(
-                                message=f"Error appending raw material for FG Code '{fg_code}': {str(e)}",
-                                title="FG Raw Material Error"
-                            )
                             continue
 
                     output.append({
@@ -528,17 +455,8 @@ class FGRawMaterialSelector(Document):
                         "raw_materials": rm_table
                     })
 
-            if output:
-                frappe.log_error(
-                    message=f"Processing output: {json.dumps(output, indent=2)}",
-                    title="FG Raw Material Output"
-                )
-            else:
+            if not output:
                 frappe.msgprint("No valid FG codes processed. Check the Error Log for details.")
-                frappe.log_error(
-                    message="No valid FG codes processed.",
-                    title="FG Raw Material Error"
-                )
 
             self.save()
 
@@ -550,10 +468,6 @@ class FGRawMaterialSelector(Document):
             )
 
         except Exception as e:
-            frappe.log_error(
-                message=f"Error in process_fg_codes: {str(e)}",
-                title="FG Raw Material Error"
-            )
             frappe.publish_realtime(
                 event='msgprint',
                 message=f'Error processing FG codes: {str(e)}',
@@ -589,7 +503,6 @@ class FGRawMaterialSelector(Document):
                             total_qty += flt(bin_data.actual_qty)
                 return total_qty > 0
             except Exception as e:
-                frappe.log_error(message=f"Error checking stock for {item_code}: {str(e)}", title="FG Stock Check Error")
                 return False
         
         # Tolerance for Raw Materials only (5mm for cutting loss)
@@ -630,20 +543,16 @@ class FGRawMaterialSelector(Document):
         try:
             # Clean FG code by removing (GD) from code part
             fg_code = self.clean_fg_code(fg_code)
-            frappe.log_error(message=f"Processing FG Code (after cleaning): {fg_code}", title="FG Single Code Debug")
             parts = fg_code.split('|')
             if len(parts) != 5:
-                frappe.log_error(message=f"Invalid FG Code format. Expected 5 parts, got {len(parts)}: {fg_code}", title="FG Raw Material Error")
                 return []
-            frappe.log_error(message=f"Server-Side Parts: {parts}", title="FG Single Code Debug")
+            
             a = safe_int(parts[0])
             b = safe_int(parts[1]) if parts[1] else 0
             fg_code_part = parts[2]
             l1 = safe_int(parts[3])
             l2 = safe_int(parts[4]) if parts[4] else 0
-            frappe.log_error(message=f"Parsed: A={a}, B={b}, FG_CODE={fg_code_part}, L1={l1}, L2={l2}", title="FG Single Code Debug")
         except Exception as e:
-            frappe.log_error(message=f"Error parsing FG Code: {str(e)}", title="FG Raw Material Error")
             return []
 
         # Define FG groups
@@ -816,7 +725,6 @@ class FGRawMaterialSelector(Document):
                 rm_code = ch_sections[a]
                 cut_dim = f"{cut_dim1},{cut_dim2}" if is_corner else cut_dim1
                 raw_materials.append({"code": rm_code, "dimension": cut_dim, "remark": fg_section_map[fg_code_part], "quantity": 1})
-                frappe.log_error(message=f"CH {'Corner' if is_corner else 'Straight'}: A={a}, using RM1={rm_code}, Cut={cut_dim}", title="CH Section Logic")
             elif a in [350, 400, 450, 500, 600] and a in ch_sections:
                 # Check if CH section has stock available
                 rm_code = ch_sections[a]
@@ -824,10 +732,8 @@ class FGRawMaterialSelector(Document):
                     # Stock available, use CH section
                     cut_dim = f"{cut_dim1},{cut_dim2}" if is_corner else cut_dim1
                     raw_materials.append({"code": rm_code, "dimension": cut_dim, "remark": fg_section_map[fg_code_part], "quantity": 1})
-                    frappe.log_error(message=f"CH {'Corner' if is_corner else 'Straight'}: A={a}, using RM1={rm_code} (stock available), Cut={cut_dim}", title="CH Section Logic")
                 else:
                     # Stock not available, fall back to L section + L section for A > 300
-                    frappe.log_error(message=f"CH {'Corner' if is_corner else 'Straight'}: A={a}, {rm_code} not in stock, using L section + L section", title="CH Section Logic")
                     for (min_a, max_a), (rm1, rm2) in section_map.items():
                         if min_a <= a <= max_a:
                             cut_dim = f"{cut_dim1},{cut_dim2}" if is_corner else cut_dim1
@@ -836,7 +742,6 @@ class FGRawMaterialSelector(Document):
                                 raw_materials.append({"code": rm2, "dimension": cut_dim, "remark": fg_section_map[fg_code_part], "quantity": 1})
                             else:
                                 raw_materials.append({"code": "MAIN FRAME", "dimension": cut_dim, "remark": fg_section_map[fg_code_part], "quantity": 1})
-                            frappe.log_error(message=f"CH {'Corner' if is_corner else 'Straight'}: A={a} in range {min_a}-{max_a}, using RM1={rm1}, RM2={rm2}, Cut={cut_dim}", title="CH Section Logic")
                             break
             elif a > 300:
                 # For A > 300 (other values), use L section + L section from section_map
@@ -848,7 +753,6 @@ class FGRawMaterialSelector(Document):
                             raw_materials.append({"code": rm2, "dimension": cut_dim, "remark": fg_section_map[fg_code_part], "quantity": 1})
                         else:
                             raw_materials.append({"code": "MAIN FRAME", "dimension": cut_dim, "remark": fg_section_map[fg_code_part], "quantity": 1})
-                        frappe.log_error(message=f"CH {'Corner' if is_corner else 'Straight'}: A={a} in range {min_a}-{max_a}, using RM1={rm1}, RM2={rm2}, Cut={cut_dim}", title="CH Section Logic")
                         break
             else:
                 # For A <= 300 but not matching exact CH sections, use L section mapping
@@ -860,7 +764,6 @@ class FGRawMaterialSelector(Document):
                             raw_materials.append({"code": rm2, "dimension": cut_dim, "remark": fg_section_map[fg_code_part], "quantity": 1})
                         else:
                             raw_materials.append({"code": "MAIN FRAME", "dimension": cut_dim, "remark": fg_section_map[fg_code_part], "quantity": 1})
-                        frappe.log_error(message=f"CH {'Corner' if is_corner else 'Straight'}: A={a} in range {min_a}-{max_a}, using RM1={rm1}, RM2={rm2}, Cut={cut_dim}", title="CH Section Logic")
                         break
             
             if fg_code_part != "PLB":
@@ -932,7 +835,6 @@ class FGRawMaterialSelector(Document):
                         if rm2 != "-":
                             raw_materials.append({"code": rm2, "dimension": cut_dim, "remark": fg_section_map[fg_code_part], "quantity": 1, "length": cut_dim1 if not is_corner else f"{length1},{length2}"})
                         matched = True
-                        frappe.log_error(message=f"IC {'Corner' if is_corner else 'Straight'}: A={a}, B={b}, FG={fg_code_part}, using RM1={rm1}, RM2={rm2}, Cut={cut_dim}", title="IC Section Logic")
                         break
                 elif isinstance(key, tuple) and len(key) == 2:
                     if (a, b) == key or (b, a) == key:
@@ -941,7 +843,6 @@ class FGRawMaterialSelector(Document):
                         if rm2 != "-":
                             raw_materials.append({"code": rm2, "dimension": cut_dim, "remark": fg_section_map[fg_code_part], "quantity": 1, "length": cut_dim1 if not is_corner else f"{length1},{length2}"})
                         matched = True
-                        frappe.log_error(message=f"IC {'Corner' if is_corner else 'Straight'}: A={a}, B={b}, using RM1={rm1}, RM2={rm2}, Cut={cut_dim}", title="IC Section Logic")
                         break
             
             if not matched:
@@ -958,11 +859,9 @@ class FGRawMaterialSelector(Document):
                 if rm1:
                     remark = "IC SECTION" if rm1.endswith("L") else fg_section_map[fg_code_part]
                     raw_materials.append({"code": rm1, "dimension": cut_dim, "remark": remark, "quantity": 1, "length": cut_dim1 if not is_corner else f"{length1},{length2}"})
-                    frappe.log_error(message=f"IC {'Corner' if is_corner else 'Straight'}: A={a}, using RM1={rm1}, Cut={cut_dim}", title="IC Section Logic")
                 if rm2:
                     remark = "IC SECTION" if rm2.endswith("L") else fg_section_map[fg_code_part]
                     raw_materials.append({"code": rm2, "dimension": cut_dim, "remark": remark, "quantity": 1, "length": cut_dim1 if not is_corner else f"{length1},{length2}"})
-                    frappe.log_error(message=f"IC {'Corner' if is_corner else 'Straight'}: B={b}, using RM2={rm2}, Cut={cut_dim}", title="IC Section Logic")
 
             # Determine if made with IC or L+L for child part dimensions
             is_made_with_ic = any(rm.get("code", "").endswith("IC") or rm.get("code", "").endswith("SL") for rm in raw_materials)
@@ -1032,7 +931,6 @@ class FGRawMaterialSelector(Document):
             if (a <= 50 and b == 100) or (b <= 50 and a == 100):
                 rm1 = "J SEC"
                 raw_materials.append({"code": rm1, "dimension": cut_dim, "remark": fg_section_map[fg_code_part], "quantity": 1, "length": length})
-                frappe.log_error(message=f"J {'Corner' if is_corner else 'Straight'}: A={a}, B={b}, using J SEC, Cut={cut_dim}", title="J Section Logic")
             else:
                 for (min_a, max_a), (temp_rm1, temp_rm2) in j_sections.items():
                     if min_a <= a <= max_a:
@@ -1043,7 +941,6 @@ class FGRawMaterialSelector(Document):
                         else:
                             rm_dim = cut_dim
                         raw_materials.append({"code": rm1, "dimension": rm_dim, "remark": fg_section_map[fg_code_part], "quantity": 1, "length": length})
-                        frappe.log_error(message=f"J {'Corner' if is_corner else 'Straight'}: A={a}, using RM1={rm1}, Cut={rm_dim}", title="J Section Logic")
                         break
             
             # Add RM2 if applicable
@@ -1051,7 +948,6 @@ class FGRawMaterialSelector(Document):
                 for (min_b, max_b), rm2_code in j_l_sections.items():
                     if min_b <= b <= max_b:
                         raw_materials.append({"code": rm2_code, "dimension": cut_dim, "remark": "J SECTION", "quantity": 1, "length": length})
-                        frappe.log_error(message=f"J {'Corner' if is_corner else 'Straight'}: B={b}, using RM2={rm2_code}, Cut={cut_dim}", title="J Section Logic")
                         break
             
             # Determine if made with J
@@ -1109,7 +1005,6 @@ class FGRawMaterialSelector(Document):
                             raw_materials.append({"code": rm2, "dimension": cut_dim, "remark": fg_section_map[fg_code_part], "quantity": 1, "length": length})
                         if rm3 != "-":
                             raw_materials.append({"code": rm3, "dimension": cut_dim, "remark": fg_section_map[fg_code_part], "quantity": 2 if rm3 == "EC" else 1, "length": length})
-                        frappe.log_error(message=f"T Straight: A={a}, using RM1={rm1}, RM2={rm2}, RM3={rm3}, Cut={cut_dim}", title="T Section Logic")
                         break
                 elif isinstance(key, tuple) and len(key) == 1:
                     if a == key[0]:
@@ -1118,7 +1013,6 @@ class FGRawMaterialSelector(Document):
                             raw_materials.append({"code": rm2, "dimension": cut_dim, "remark": fg_section_map[fg_code_part], "quantity": 2 if rm2 == "EC" else 1, "length": length})
                         if rm3 != "-":
                             raw_materials.append({"code": rm3, "dimension": cut_dim, "remark": fg_section_map[fg_code_part], "quantity": 2 if rm3 == "EC" else 1, "length": length})
-                        frappe.log_error(message=f"T Straight: A={a}, using RM1={rm1}, RM2={rm2}, RM3={rm3}, Cut={cut_dim}", title="T Section Logic")
                         break
             
             side_rail_qty = 2 if degree_cutting and fg_code_part in ["WRBSE", "WRSE"] else 2
@@ -1166,22 +1060,18 @@ class FGRawMaterialSelector(Document):
                     if check_stock_available("RK-125"):
                         # Stock available, use RK-125
                         raw_materials.append({"code": "RK-125", "dimension": cut_dim, "remark": fg_section_map[fg_code_part], "quantity": 1, "length": length})
-                        frappe.log_error(message=f"Misc Straight: A={a}, FG={fg_code_part}, using RK-125 (stock available), Cut={cut_dim}", title="Misc Section Logic")
                     else:
                         # Stock not available, use 130 L instead
                         raw_materials.append({"code": "130 L", "dimension": cut_dim, "remark": fg_section_map[fg_code_part], "quantity": 1, "length": length})
-                        frappe.log_error(message=f"Misc Straight: A={a}, FG={fg_code_part}, RK-125 not in stock, using 130 L instead, Cut={cut_dim}", title="Misc Section Logic")
                 else:
                     # For all other cases, use normal logic
                     raw_materials.append({"code": rm1, "dimension": cut_dim, "remark": fg_section_map[fg_code_part], "quantity": 1, "length": length})
                     if rm2 != "-":
                         raw_materials.append({"code": rm2, "dimension": cut_dim, "remark": fg_section_map[fg_code_part], "quantity": 1, "length": length})
-                    frappe.log_error(message=f"Misc Straight: A={a}, FG={fg_code_part}, using RM1={rm1}, Cut={cut_dim}", title="Misc Section Logic")
             elif fg_code_part == "RK" and a != 50:
                 for (min_a, max_a), (rm1, rm2) in ic_l_section_map.items():
                     if min_a <= a <= max_a:
                         raw_materials.append({"code": rm1, "dimension": cut_dim, "remark": "MISC SECTION", "quantity": 1, "length": length})
-                        frappe.log_error(message=f"Misc Straight: RK with A={a}, using RM1={rm1}, Cut={cut_dim}, Remark=MISC SECTION", title="Misc Section Logic")
                         break
             
             if fg_code_part == "DP":
@@ -1196,11 +1086,8 @@ class FGRawMaterialSelector(Document):
                 raw_materials.append({"code": "ROUND PIPE", "dimension": f"{105+child_tolerance}", "remark": "CHILD PART", "quantity": 1, "length": f"{105+child_tolerance}"})
 
         else:
-            frappe.log_error(message=f"Skipping invalid FG Code: {fg_code_part}, Full Code: {fg_code}", title="FG Raw Material Error")
             return []
         
-        frappe.log_error(message=f"Child Parts for FG Code {fg_code_part}: {json.dumps(child_parts, indent=2)}", title="Child Parts Debug")
-        frappe.log_error(message=f"Returning raw_materials for FG Code {fg_code}: {json.dumps(raw_materials, indent=2)}", title="FG Single Code Debug")
         return raw_materials
 
 
@@ -1208,10 +1095,6 @@ class FGRawMaterialSelector(Document):
 @frappe.whitelist()
 def get_raw_materials(docname=None, planning_bom=None):
     try:
-        frappe.log_error(
-            message=f"get_raw_materials called with docname: {docname}, planning_bom: {planning_bom}",
-            title="FG Get Raw Materials Debug"
-        )
         if not docname:
             frappe.throw(_("No FG Raw Material Selector document specified."))
         if not planning_bom:
@@ -1228,7 +1111,7 @@ def get_raw_materials(docname=None, planning_bom=None):
                     doc.project = first_pbom.project
                     doc.save()
             except Exception as e:
-                frappe.log_error(f"Error fetching project from Planning BOM: {str(e)}", "FG Auto-fetch Project")
+                pass  # Silently skip project auto-fetch errors
 
         pbom_list = []
         if isinstance(planning_bom, str):
@@ -1284,12 +1167,10 @@ def get_raw_materials(docname=None, planning_bom=None):
 @frappe.whitelist()
 def process_fg_codes_background(docname):
     try:
-        frappe.log_error(message=f"Starting background job for FG Raw Material Selector: {docname}", title="FG Background Debug")
         doc = frappe.get_doc("FG Raw Material Selector", docname)
         doc.process_fg_codes()
-        frappe.log_error(message=f"Completed background job for FG Raw Material Selector: {docname}", title="FG Background Debug")
     except Exception as e:
-        frappe.log_error(message=f"Error in background job for {docname}: {str(e)}", title="FG Raw Material Error")
+        frappe.log_error(message=frappe.get_traceback(), title=f"FG Process Error - {docname}")
         raise
 
 
@@ -1366,7 +1247,8 @@ def create_material_request(fg_selector_name):
             return "No shortfalls to request."
 
     except Exception as e:
-        frappe.log_error(message=f"Error creating Material Request: {str(e)}", title="FG Raw Material Error")
+        frappe.log_error(message=frappe.get_traceback(), title="Create MR Error")
+        frappe.throw(f"Failed to create Material Request: {str(e)}")
         
 
 @frappe.whitelist()
@@ -1382,7 +1264,6 @@ def mark_as_completed(docname):
             "message": f"FG Raw Material Selector {docname} marked as Completed"
         }
     except Exception as e:
-        frappe.log_error(message=f"Error marking as completed: {str(e)}", title="FG Raw Material Error")
         frappe.throw(f"Failed to mark as completed: {str(e)}")
 
 @frappe.whitelist()
@@ -1398,7 +1279,6 @@ def cancel_document(docname):
             "message": f"FG Raw Material Selector {docname} cancelled"
         }
     except Exception as e:
-        frappe.log_error(message=f"Error cancelling document: {str(e)}", title="FG Raw Material Error")
         frappe.throw(f"Failed to cancel document: {str(e)}")
 
 @frappe.whitelist()
@@ -1460,7 +1340,6 @@ def fetch_pending_items(docname):
             "message": f"Fetched {item_count} pending items from {len(doc.planning_bom)} Planning BOM(s)"
         }
     except Exception as e:
-        frappe.log_error(message=f"Error fetching pending items: {str(e)}", title="FG Raw Material Error")
         frappe.throw(f"Failed to fetch pending items: {str(e)}")
 
 
