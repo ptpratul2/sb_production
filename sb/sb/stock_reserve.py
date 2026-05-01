@@ -2,6 +2,8 @@ import frappe
 from frappe.utils import flt
 import math
 
+RESERVATION_CHUNK_SIZE = 200
+
 
 @frappe.whitelist()
 def reserve_stock_physically(fg_selector_name):
@@ -50,23 +52,23 @@ def reserve_stock_background(fg_selector_name, user):
             )
             return
 
-        # Clean up any orphaned bundles from previous failed attempts
-        frappe.db.sql("""
-            DELETE sbb FROM `tabSerial and Batch Bundle` sbb
-            LEFT JOIN `tabStock Entry Detail` sed ON sed.serial_and_batch_bundle = sbb.name
-            WHERE sbb.voucher_type = 'Stock Entry'
-              AND sbb.type_of_transaction = 'Outward'
-              AND sed.name IS NULL
-              AND sbb.creation > DATE_SUB(NOW(), INTERVAL 1 HOUR)
-        """)
-        frappe.db.commit()
+        # Reuse latest draft transfer for same selector instead of creating duplicates.
+        existing_open_entry = frappe.db.get_value(
+            "Stock Entry",
+            {
+                "fg_raw_material_selector": fg_selector_name,
+                "docstatus": 0,
+                "purpose": "Material Transfer",
+            },
+            "name",
+            order_by="creation desc",
+        )
 
         # Reservation-only RM/OC allocation (does NOT write rm_oc_simulation rows)
         serial_nos, piece_map, _ns_shortfalls = _allocate_rm_oc_pieces_for_reservation(doc)
 
         # Persist IS/NIS status updates even if reservation exits early.
         doc.save(ignore_permissions=True)
-        frappe.db.commit()
 
         if not serial_nos:
             frappe.publish_realtime(
@@ -100,14 +102,59 @@ def reserve_stock_background(fg_selector_name, user):
         # Convert to dict for fast lookup
         serial_dict = {row.name: row for row in serial_details}
 
-        # Create Stock Entry
-        entry = frappe.new_doc("Stock Entry")
-        entry.stock_entry_type = "Material Transfer"
-        entry.purpose = "Material Transfer"
-        entry.set_posting_time = 1
-        entry.fg_raw_material_selector = fg_selector_name
-        entry.company = company
+        def _new_reservation_entry():
+            entry = frappe.new_doc("Stock Entry")
+            entry.stock_entry_type = "Material Transfer"
+            entry.purpose = "Material Transfer"
+            entry.set_posting_time = 1
+            entry.fg_raw_material_selector = fg_selector_name
+            entry.company = company
+            return entry
 
+        # Reuse only one existing draft; additional rows go to chunked fresh entries.
+        reusable_entry = frappe.get_doc("Stock Entry", existing_open_entry) if existing_open_entry else None
+
+        # Prevent double-booking serials already present in open reservation transfers.
+        # Read from both legacy `serial_no` and Serial/Batch Bundle entries.
+        used_serial_rows = frappe.db.sql(
+            """
+            SELECT sbe.serial_no
+            FROM `tabStock Entry Detail` sed
+            INNER JOIN `tabStock Entry` se ON se.name = sed.parent
+            INNER JOIN `tabSerial and Batch Entry` sbe ON sbe.parent = sed.serial_and_batch_bundle
+            WHERE se.docstatus < 2
+              AND se.purpose = 'Material Transfer'
+              AND IFNULL(sbe.serial_no, '') != ''
+              AND sed.t_warehouse = %s
+              AND sed.s_warehouse IN (%s, %s)
+            UNION
+            SELECT sed.serial_no
+            FROM `tabStock Entry Detail` sed
+            INNER JOIN `tabStock Entry` se ON se.name = sed.parent
+            WHERE se.docstatus < 2
+              AND se.purpose = 'Material Transfer'
+              AND IFNULL(sed.serial_no, '') != ''
+              AND sed.t_warehouse = %s
+              AND sed.s_warehouse IN (%s, %s)
+            """,
+            (
+                reserved_warehouse,
+                oc_warehouse,
+                rm_warehouse,
+                reserved_warehouse,
+                oc_warehouse,
+                rm_warehouse,
+            ),
+            as_dict=True,
+        )
+        used_serials = set()
+        for row in used_serial_rows:
+            for token in str(row.serial_no or "").replace("\n", ",").split(","):
+                token = token.strip()
+                if token:
+                    used_serials.add(token)
+
+        pending_items = []
         for sn in serial_nos:
             info = piece_map.get(sn)
             if not info:
@@ -122,9 +169,13 @@ def reserve_stock_background(fg_selector_name, user):
                 frappe.log_error(f"Warehouse mismatch for {sn}: expected {info['s_warehouse']}, found {s_detail.warehouse}")
                 continue
 
+            if sn in used_serials:
+                # Already referenced in another open transfer; skip to avoid phantom reserve.
+                continue
+
             item_uom = frappe.db.get_value("Item", s_detail.item_code, "stock_uom") or "Nos"
 
-            entry.append("items", {
+            pending_items.append({
                 "item_code": s_detail.item_code,
                 "qty": 1,
                 "uom": item_uom,
@@ -136,8 +187,9 @@ def reserve_stock_background(fg_selector_name, user):
                 "custom_total_length": flt(s_detail.custom_length),
                 "cost_center": cost_center
             })
+            used_serials.add(sn)
 
-        if not entry.items:
+        if not pending_items:
             frappe.publish_realtime(
                 event='msgprint',
                 message={
@@ -149,34 +201,56 @@ def reserve_stock_background(fg_selector_name, user):
             )
             return
 
-        # Reconnect before saving (ensure fresh connection after long processing)
-        frappe.db.connect()
-        entry.save()
+        created_entries = []
 
-        # Fix for ERPNext v15+: If Serial and Batch Bundle is created, clear legacy serial_no field to avoid validation error on submit
-        # Use direct SQL to ensure it is cleared in DB, bypassing any ORM hooks or cache
-        frappe.db.sql("""
-            UPDATE `tabStock Entry Detail` 
-            SET serial_no='', batch_no='' 
-            WHERE parent = %s AND serial_and_batch_bundle IS NOT NULL AND serial_and_batch_bundle != ''
-        """, (entry.name,))
-        frappe.db.commit()
-        
-        # Clear document cache to ensure next get_doc fetches fresh data
-        frappe.clear_document_cache("Stock Entry", entry.name)
-        
-        # Re-fetch fresh document and reconnect before submit
-        frappe.db.connect()
-        entry = frappe.get_doc("Stock Entry", entry.name)
-        entry.submit()
-        frappe.db.commit()
+        # First consume pending rows in reusable draft (if present), then chunk into new entries.
+        if reusable_entry and reusable_entry.docstatus == 0:
+            for item_row in pending_items[:RESERVATION_CHUNK_SIZE]:
+                reusable_entry.append("items", item_row)
+
+            if reusable_entry.items:
+                frappe.db.connect()
+                reusable_entry.save()
+                reusable_entry.submit()
+                created_entries.append(reusable_entry.name)
+
+            pending_items = pending_items[RESERVATION_CHUNK_SIZE:]
+
+        for i in range(0, len(pending_items), RESERVATION_CHUNK_SIZE):
+            chunk_rows = pending_items[i:i + RESERVATION_CHUNK_SIZE]
+            if not chunk_rows:
+                continue
+
+            entry = _new_reservation_entry()
+            for item_row in chunk_rows:
+                entry.append("items", item_row)
+
+            frappe.db.connect()
+            entry.save()
+            # Let the Stock Entry before_submit hook clear legacy serial/batch fields
+            # to keep this flow atomic and avoid mid-transaction DB mutations.
+            entry.submit()
+            created_entries.append(entry.name)
+
+        if not created_entries:
+            frappe.publish_realtime(
+                event='msgprint',
+                message={
+                    'message': 'No Stock Entry could be created for reservation.',
+                    'indicator': 'orange',
+                    'alert': True
+                },
+                user=user
+            )
+            return
 
         # Update raw_materials rows
         for row in doc.raw_materials:
             if row.status == "IS":
                 row.warehouse = reserved_warehouse
                 row.reserve_tag = 1
-                row.stock_entry = entry.name
+                # Link to first created transfer to preserve existing single-link semantics.
+                row.stock_entry = created_entries[0]
 
         doc.save(ignore_permissions=True)
 
@@ -184,8 +258,9 @@ def reserve_stock_background(fg_selector_name, user):
             event='stock_reservation_done',
             message={
                 'status': 'success',
-                'message': f'Stock reserved successfully via Stock Entry {entry.name}',
-                'stock_entry': entry.name,
+                'message': f'Stock reserved successfully via {len(created_entries)} Stock Entr{"y" if len(created_entries) == 1 else "ies"}',
+                'stock_entry': created_entries[0],
+                'stock_entries': created_entries,
                 'docname': fg_selector_name
             },
             user=user
@@ -431,7 +506,6 @@ def update_serial_no_length_from_bundle(doc, method=None):
 
         updated += 1
 
-    frappe.db.commit()
     frappe.log_error(f"Updated {updated} serial numbers for bundle {doc.name}", "Serial Length Sync")
 
 

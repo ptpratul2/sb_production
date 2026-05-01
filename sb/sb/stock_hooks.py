@@ -134,20 +134,15 @@ def clear_length_in_sle(doc, method):
     Reset custom_length and custom_total_length in Stock Ledger Entries
     when document is cancelled.
     """
-    sle_list = frappe.get_all(
-        "Stock Ledger Entry",
-        filters={"voucher_no": doc.name},
-        fields=["name"]
+    frappe.db.sql(
+        """
+        UPDATE `tabStock Ledger Entry`
+        SET custom_length = 0, custom_total_length = 0
+        WHERE voucher_no = %s
+          AND voucher_type = %s
+        """,
+        (doc.name, doc.doctype),
     )
-    for sle in sle_list:
-        frappe.db.set_value(
-            "Stock Ledger Entry",
-            sle.name,
-            {
-                "custom_length": 0,
-                "custom_total_length": 0
-            }
-        )
 
 def update_serial_no_length(doc, method):
     """
@@ -222,9 +217,7 @@ def update_serial_no_length(doc, method):
                 )
                 continue
         
-        # Commit after processing each item to ensure updates are saved
-        if updated_count > 0:
-            frappe.db.commit()
+        # Keep this in the outer transaction; avoid fragmented commits in hooks.
 
 
 
@@ -350,6 +343,7 @@ def create_material_request_for_shortfall(fg_selector_name):
 
         import math
 
+        std_bar_length_mm = 4820.0
         for item_code, ns in ns_shortfalls.items():
             details = ns.get("details") or []
             fg_links = ns.get("fg_links") or []
@@ -360,8 +354,8 @@ def create_material_request_for_shortfall(fg_selector_name):
             
             # Calculate quantity: Round Up (Total Length / 4820)
             if total_length > 0:
-                qty = math.ceil(total_length / 4820.0)
-                qty_description = f"Required Qty: {qty} (based on {total_length}mm / 4820mm)"
+                qty = math.ceil(total_length / std_bar_length_mm)
+                qty_description = f"Required Qty: {qty} (based on {total_length}mm / {int(std_bar_length_mm)}mm)"
             else:
                 # Fallback if length is missing/zero: use total pieces
                 qty = max(1, math.ceil(total_pieces))
@@ -374,12 +368,18 @@ def create_material_request_for_shortfall(fg_selector_name):
             # Let's list them.
             length_list_str = ", ".join([f"{int(l)}x{int(q)}" for l, q in details if l > 0])
             
+            # Reporting fallback:
+            # - custom_length holds per-bar standard length for length-based requests
+            # - custom_total_length holds the aggregate required total length
+            row_custom_length = flt(std_bar_length_mm) if total_length > 0 else 0
+
             mr.append("items", {
                 "item_code": item_code,
                 "qty": qty,
                 "uom": frappe.get_value("Item", item_code, "stock_uom") or "Nos",
                 "warehouse": warehouse,
-                "custom_length": total_length,  # Total length required
+                "custom_length": row_custom_length,
+                "custom_total_length": flt(total_length),
                 "schedule_date": frappe.utils.add_days(frappe.utils.today(), 7),
                 "description": f"Auto-generated from FG Raw Material Selector {doc.name}\n"
                               f"NS Shortfall • {qty_description}\n"

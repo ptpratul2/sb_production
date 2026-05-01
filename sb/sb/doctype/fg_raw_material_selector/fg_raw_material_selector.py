@@ -6,10 +6,47 @@ import frappe
 from frappe import _
 from frappe.model.document import Document
 import json
+import re
 from frappe.utils.background_jobs import enqueue
 from frappe.utils import flt,cint
 import math
 from collections import defaultdict
+
+
+def _extract_cut_lengths_mm(length_value=None, dimension_value=None, l1_value=None, l2_value=None):
+    """
+    Parse cut lengths in mm from raw material row values.
+    Priority: explicit `length` field, then fallback to `dimension`.
+    Handles values like:
+      - "2404"
+      - "2404,1179"
+      - "304X5.66X4"  -> 304
+    """
+    source = length_value if (length_value not in (None, "")) else (dimension_value or "")
+    tokens = [t.strip() for t in str(source).split(",") if t and t.strip()]
+    lengths = []
+
+    for token in tokens:
+        if token == "-":
+            continue
+        # For profile dimensions like "304X5.66X4", take the first segment as cut length.
+        first_part = token.split("X")[0].split("x")[0].strip()
+        match = re.search(r"\d+(?:\.\d+)?", first_part)
+        if not match:
+            continue
+        value = flt(match.group(0))
+        if value > 0:
+            lengths.append(value)
+
+    # Final fallback for rows where length/dimension is not parseable.
+    # L1/L2 are often present in selector rows and represent cut lengths.
+    if not lengths:
+        for candidate in (l1_value, l2_value):
+            candidate_val = flt(candidate)
+            if candidate_val > 0:
+                lengths.append(candidate_val)
+
+    return lengths
 
 class FGRawMaterialSelector(Document):
     @staticmethod
@@ -429,6 +466,7 @@ class FGRawMaterialSelector(Document):
                             "l2": l2,
                             "bom_qty": bom_qty,
                             "dimension": rm.get("dimension"),
+                            "length": rm.get("length"),
                             "remark": rm.get("remark"),
                             "quantity": rm_quantity,
                             "project": pbom_project,
@@ -1212,9 +1250,12 @@ def create_material_request(fg_selector_name):
                 frappe.throw(f"Warehouse is required for item {item_code}. Please set warehouse in raw materials table or in parent document.")
 
             for row in group_rows:
-                dims = []
-                if row.dimension:
-                    dims += [flt(v.strip()) for v in row.dimension.split(',') if v.strip()]
+                dims = _extract_cut_lengths_mm(
+                    length_value=getattr(row, "length", None),
+                    dimension_value=row.dimension,
+                    l1_value=getattr(row, "l1", None),
+                    l2_value=getattr(row, "l2", None),
+                )
                 if dims:
                     total_length += sum(dims) * flt(row.quantity)
                 else:
@@ -1366,18 +1407,19 @@ def _allocate_rm_oc_pieces_for_reservation(doc):
     total_qty_map = {}  # key: (fg, rm_item, length) -> total qty
 
     for row in doc.raw_materials:
-        if not row.item_code or not row.dimension or not row.quantity:
+        if not row.item_code or not row.quantity:
             continue
 
         fg_code = row.fg_code or ""
         rm_item = row.item_code
         qty = cint(row.quantity)
 
-        required_lengths = [
-            flt(v.strip())
-            for v in (row.dimension or "").split(",")
-            if v.strip() and v.strip() != "-"
-        ]
+        required_lengths = _extract_cut_lengths_mm(
+            length_value=getattr(row, "length", None),
+            dimension_value=row.dimension,
+            l1_value=getattr(row, "l1", None),
+            l2_value=getattr(row, "l2", None),
+        )
 
         for length in required_lengths:
             key = (fg_code, rm_item, length)
@@ -1403,6 +1445,8 @@ def _allocate_rm_oc_pieces_for_reservation(doc):
     fg_has_ns = set()
     # rm_item_code -> {cut_length_mm -> qty_of_rm}
     ns_length_qty = defaultdict(lambda: defaultdict(int))
+    # (fg_code, rm_item_code, cut_length_mm) -> qty_of_rm
+    ns_cut_qty = defaultdict(int)
     # rm_item_code -> set(fg_code)
     ns_fg_links = defaultdict(set)
 
@@ -1504,16 +1548,35 @@ def _allocate_rm_oc_pieces_for_reservation(doc):
             for cut in cuts:
                 fg_has_ns.add(cut["fg_code"])
                 ns_length_qty[rm_item][flt(cut["length"])] += 1
+                ns_cut_qty[(cut["fg_code"], rm_item, flt(cut["length"]))] += 1
                 ns_fg_links[rm_item].add(cut["fg_code"])
 
-    # STEP 3: Update status in raw_materials based on allocation.
-    # Primary key is FG code, with item-code fallback in case FG mapping is
-    # incomplete/inconsistent for some generated rows.
-    ns_item_codes = set(ns_length_qty.keys())
+    # STEP 3: Update status in raw_materials based on true uncovered cuts.
+    # Mark NIS only for rows that still have uncovered length demand.
     for raw_row in doc.raw_materials:
         fg_code = (raw_row.fg_code or "").strip()
         item_code = (raw_row.item_code or "").strip()
-        raw_row.status = "NIS" if (fg_code in fg_has_ns or item_code in ns_item_codes) else "IS"
+        row_qty = cint(raw_row.quantity or 0)
+        row_lengths = _extract_cut_lengths_mm(
+            length_value=getattr(raw_row, "length", None),
+            dimension_value=raw_row.dimension,
+            l1_value=getattr(raw_row, "l1", None),
+            l2_value=getattr(raw_row, "l2", None),
+        )
+
+        is_ns = False
+        if fg_code and item_code and row_qty > 0 and row_lengths:
+            for length_mm in row_lengths:
+                key = (fg_code, item_code, flt(length_mm))
+                pending = cint(ns_cut_qty.get(key, 0))
+                if pending <= 0:
+                    continue
+                consume = min(pending, row_qty)
+                if consume > 0:
+                    ns_cut_qty[key] = pending - consume
+                    is_ns = True
+
+        raw_row.status = "NIS" if is_ns else "IS"
 
     # Keep `min_oc_length_mm` referenced so it won't look unused during linting
     _ = min_oc_length_mm
@@ -1564,14 +1627,19 @@ def _run_rm_oc_calculation(fg_selector_name: str) -> str:
     total_qty_map = {}  # key: (fg, rm_item, length) -> total qty
 
     for row in doc.raw_materials:
-        if not row.item_code or not row.dimension or not row.quantity:
+        if not row.item_code or not row.quantity:
             continue
 
         fg_code = row.fg_code or ""
         rm_item = row.item_code
         qty = cint(row.quantity)
 
-        required_lengths = [flt(v.strip()) for v in (row.dimension or "").split(',') if v.strip() and v.strip() != '-']
+        required_lengths = _extract_cut_lengths_mm(
+            length_value=getattr(row, "length", None),
+            dimension_value=row.dimension,
+            l1_value=getattr(row, "l1", None),
+            l2_value=getattr(row, "l2", None),
+        )
 
         for length in required_lengths:
             key = (fg_code, rm_item, length)
