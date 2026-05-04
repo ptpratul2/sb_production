@@ -12,6 +12,8 @@ from frappe.utils import flt,cint
 import math
 from collections import defaultdict
 
+from erpnext.stock.utils import get_stock_balance
+
 
 def _extract_cut_lengths_mm(length_value=None, dimension_value=None, l1_value=None, l2_value=None):
     """
@@ -90,25 +92,42 @@ class FGRawMaterialSelector(Document):
             self.validate_issued_quantities()
     
     def validate_issued_quantities(self):
-        """Ensure issued quantities don't exceed remaining quantities"""
+        """
+        Ensure issued quantities don't exceed remaining quantities.
+
+        Bulk-fetches every referenced FG Component once instead of doing one
+        ``frappe.get_doc`` per raw_materials row (was O(N) for huge selectors).
+        """
+        pbom_refs = list({
+            item.planning_bom_item_reference
+            for item in self.raw_materials
+            if item.planning_bom_item_reference
+        })
+        if not pbom_refs:
+            return
+
+        remaining_map = {}
+        for fg in frappe.get_all(
+            "FG Components",
+            filters={"name": ["in", pbom_refs]},
+            fields=["name", "remaining_qty"],
+        ):
+            remaining_map[fg.name] = flt(fg.remaining_qty)
+
         for item in self.raw_materials:
             if not item.planning_bom_item_reference:
                 continue
-            
-            try:
-                pbom_item = frappe.get_doc("FG Components", item.planning_bom_item_reference)
-                remaining = flt(pbom_item.remaining_qty)
-                issued = flt(item.quantity)
-                
-                if issued > remaining:
-                    frappe.msgprint(
-                        f"Row #{item.idx}: Issued quantity ({issued}) exceeds "
-                        f"remaining quantity ({remaining}) for {item.fg_code}",
-                        indicator="orange",
-                        alert=True
-                    )
-            except Exception as e:
-                pass  # Skip validation errors for individual rows
+            remaining = remaining_map.get(item.planning_bom_item_reference)
+            if remaining is None:
+                continue
+            issued = flt(item.quantity)
+            if issued > remaining:
+                frappe.msgprint(
+                    f"Row #{item.idx}: Issued quantity ({issued}) exceeds "
+                    f"remaining quantity ({remaining}) for {item.fg_code}",
+                    indicator="orange",
+                    alert=True,
+                )
     
     def on_submit(self):
         """Update processed quantities in Planning BOM on submission"""
@@ -125,45 +144,42 @@ class FGRawMaterialSelector(Document):
         self.db_update()
     
     def update_planning_bom_quantities(self):
-        """Update processed_qty in Planning BOM items"""
-        pbom_updates = {}  # Track updates per Planning BOM
-        pbom_item_qty_map = {}  # Track total quantity per Planning BOM item to avoid duplicates
-        
-        # First, aggregate quantities by Planning BOM item
-        # This handles cases where one Planning BOM item generates multiple raw materials
+        """
+        Update ``processed_qty`` / ``remaining_qty`` in linked FG Components.
+
+        Bulk-fetches every referenced FG Component in one query (was O(N)
+        ``frappe.get_doc`` calls), then issues per-row updates only with the
+        already-loaded values.
+        """
+        pbom_item_qty_map = {}
         for item in self.raw_materials:
             if not item.planning_bom_item_reference:
                 continue
-            
             pbom_item_name = item.planning_bom_item_reference
-            
-            # Only count each Planning BOM item once, using the bom_qty field
-            # which represents the original quantity from the Planning BOM
             if pbom_item_name not in pbom_item_qty_map:
-                # Use bom_qty if available, otherwise use quantity
                 issued_qty = flt(item.bom_qty) if item.bom_qty else flt(item.quantity)
                 pbom_item_qty_map[pbom_item_name] = issued_qty
-        
-        # Now update each Planning BOM item only once with the aggregated quantity
-        for pbom_item_name, issued_qty in pbom_item_qty_map.items():
-            # Get current values
-            pbom_item = frappe.get_doc("FG Components", pbom_item_name)
-            new_processed = flt(pbom_item.processed_qty) + issued_qty
-            new_remaining = flt(pbom_item.required_qty or pbom_item.quantity) - new_processed
-            
-            # Update the item
-            frappe.db.set_value("FG Components", pbom_item_name, {
+
+        if not pbom_item_qty_map:
+            return
+
+        fg_rows = frappe.get_all(
+            "FG Components",
+            filters={"name": ["in", list(pbom_item_qty_map.keys())]},
+            fields=["name", "parent", "processed_qty", "required_qty", "quantity"],
+        )
+
+        pbom_updates = {}
+        for fg in fg_rows:
+            issued_qty = pbom_item_qty_map.get(fg.name, 0)
+            new_processed = flt(fg.processed_qty) + issued_qty
+            new_remaining = flt(fg.required_qty or fg.quantity) - new_processed
+            frappe.db.set_value("FG Components", fg.name, {
                 "processed_qty": new_processed,
-                "remaining_qty": max(0, new_remaining)
+                "remaining_qty": max(0, new_remaining),
             })
-            
-            # Track which Planning BOMs need status updates
-            pbom_name = pbom_item.parent
-            if pbom_name not in pbom_updates:
-                pbom_updates[pbom_name] = []
-            pbom_updates[pbom_name].append(pbom_item_name)
-        
-        # Update Planning BOM statuses
+            pbom_updates.setdefault(fg.parent, []).append(fg.name)
+
         for pbom_name in pbom_updates:
             self.update_planning_bom_status(pbom_name)
     
@@ -176,54 +192,51 @@ class FGRawMaterialSelector(Document):
         self.update_pdu_status_from_pbom(pbom_doc)
     
     def update_project_design_upload_quantities(self):
-        """Update processed quantities in Project Design Upload items"""
-        pdu_item_updates = {}
-        pdu_item_qty_map = {}  # Track total quantity per PDU item to avoid duplicates
-        
-        # First, aggregate quantities by PDU item
-        # This handles cases where one Planning BOM item (linked to one PDU item) generates multiple raw materials
+        """
+        Update PDU item processed/remaining qty.
+
+        Bulk-fetches FG Components -> Project Design Upload Item links once instead of
+        N ``frappe.get_doc("FG Components", …)`` calls in a tight loop.
+        """
+        pbom_item_to_qty = {}
         for item in self.raw_materials:
-            if not item.planning_bom_item_reference:
+            ref = item.planning_bom_item_reference
+            if not ref or ref in pbom_item_to_qty:
                 continue
-            
-            # Get the Planning BOM item to find linked PDU item
-            pbom_item = frappe.get_doc("FG Components", item.planning_bom_item_reference)
-            pdu_item_name = pbom_item.project_design_upload_item
-            
-            if not pdu_item_name:
+            pbom_item_to_qty[ref] = flt(item.bom_qty) if item.bom_qty else flt(item.quantity)
+
+        if not pbom_item_to_qty:
+            return
+
+        pdu_item_qty_map = {}
+        for fg in frappe.get_all(
+            "FG Components",
+            filters={"name": ["in", list(pbom_item_to_qty.keys())]},
+            fields=["name", "project_design_upload_item"],
+        ):
+            pdu_item_name = fg.project_design_upload_item
+            if not pdu_item_name or pdu_item_name in pdu_item_qty_map:
                 continue
-            
-            # Only count each PDU item once, using the bom_qty field
-            if pdu_item_name not in pdu_item_qty_map:
-                # Use bom_qty if available, otherwise use quantity
-                issued_qty = flt(item.bom_qty) if item.bom_qty else flt(item.quantity)
-                pdu_item_qty_map[pdu_item_name] = {
-                    'quantity': issued_qty,
-                    'pbom_item': pbom_item
-                }
-        
-        # Now update each PDU item only once with the aggregated quantity
-        for pdu_item_name, data in pdu_item_qty_map.items():
-            issued_qty = data['quantity']
-            pbom_item = data['pbom_item']
-            
-            # Update PDU item
-            pdu_item = frappe.get_doc("Project Design Upload Item", pdu_item_name)
-            new_processed = flt(pdu_item.processed_qty) + issued_qty
-            new_remaining = flt(pdu_item.quantity) - new_processed
-            
-            frappe.db.set_value("Project Design Upload Item", pdu_item_name, {
+            pdu_item_qty_map[pdu_item_name] = pbom_item_to_qty.get(fg.name, 0)
+
+        if not pdu_item_qty_map:
+            return
+
+        pdu_item_updates = {}
+        for pdu_row in frappe.get_all(
+            "Project Design Upload Item",
+            filters={"name": ["in", list(pdu_item_qty_map.keys())]},
+            fields=["name", "parent", "processed_qty", "quantity"],
+        ):
+            issued_qty = pdu_item_qty_map.get(pdu_row.name, 0)
+            new_processed = flt(pdu_row.processed_qty) + issued_qty
+            new_remaining = flt(pdu_row.quantity) - new_processed
+            frappe.db.set_value("Project Design Upload Item", pdu_row.name, {
                 "processed_qty": new_processed,
-                "remaining_qty": max(0, new_remaining)
+                "remaining_qty": max(0, new_remaining),
             })
-            
-            # Track PDU for status update
-            pdu_name = pdu_item.parent
-            if pdu_name not in pdu_item_updates:
-                pdu_item_updates[pdu_name] = []
-            pdu_item_updates[pdu_name].append(pdu_item_name)
-        
-        # Update PDU statuses
+            pdu_item_updates.setdefault(pdu_row.parent, []).append(pdu_row.name)
+
         for pdu_name in pdu_item_updates:
             self.update_pdu_status(pdu_name)
     
@@ -257,85 +270,80 @@ class FGRawMaterialSelector(Document):
             self.update_pdu_status(pdu_name)
     
     def reverse_planning_bom_quantities(self):
-        """Reverse processed quantities when cancelling"""
-        pbom_updates = {}
-        pbom_item_qty_map = {}  # Track total quantity per Planning BOM item to avoid duplicates
-        
-        # First, aggregate quantities by Planning BOM item
+        """Reverse processed quantities on cancel using a single batched read."""
+        pbom_item_qty_map = {}
         for item in self.raw_materials:
             if not item.planning_bom_item_reference:
                 continue
-            
             pbom_item_name = item.planning_bom_item_reference
-            
-            # Only count each Planning BOM item once
             if pbom_item_name not in pbom_item_qty_map:
-                # Use bom_qty if available, otherwise use quantity
                 issued_qty = flt(item.bom_qty) if item.bom_qty else flt(item.quantity)
                 pbom_item_qty_map[pbom_item_name] = issued_qty
-        
-        # Now reverse each Planning BOM item only once
-        for pbom_item_name, issued_qty in pbom_item_qty_map.items():
-            pbom_item = frappe.get_doc("FG Components", pbom_item_name)
-            new_processed = max(0, flt(pbom_item.processed_qty) - issued_qty)
-            new_remaining = flt(pbom_item.required_qty or pbom_item.quantity) - new_processed
-            
-            frappe.db.set_value("FG Components", pbom_item_name, {
+
+        if not pbom_item_qty_map:
+            return
+
+        fg_rows = frappe.get_all(
+            "FG Components",
+            filters={"name": ["in", list(pbom_item_qty_map.keys())]},
+            fields=["name", "parent", "processed_qty", "required_qty", "quantity"],
+        )
+
+        pbom_updates = {}
+        for fg in fg_rows:
+            issued_qty = pbom_item_qty_map.get(fg.name, 0)
+            new_processed = max(0, flt(fg.processed_qty) - issued_qty)
+            new_remaining = flt(fg.required_qty or fg.quantity) - new_processed
+            frappe.db.set_value("FG Components", fg.name, {
                 "processed_qty": new_processed,
-                "remaining_qty": max(0, new_remaining)
+                "remaining_qty": max(0, new_remaining),
             })
-            
-            pbom_name = pbom_item.parent
-            if pbom_name not in pbom_updates:
-                pbom_updates[pbom_name] = []
-            pbom_updates[pbom_name].append(pbom_item_name)
-        
+            pbom_updates.setdefault(fg.parent, []).append(fg.name)
+
         for pbom_name in pbom_updates:
             self.update_planning_bom_status(pbom_name)
     
     def reverse_project_design_upload_quantities(self):
-        """Reverse PDU quantities when cancelling"""
-        pdu_item_updates = {}
-        pdu_item_qty_map = {}  # Track total quantity per PDU item to avoid duplicates
-        
-        # First, aggregate quantities by PDU item
+        """Reverse PDU quantities on cancel using batched reads."""
+        pbom_item_to_qty = {}
         for item in self.raw_materials:
-            if not item.planning_bom_item_reference:
+            ref = item.planning_bom_item_reference
+            if not ref or ref in pbom_item_to_qty:
                 continue
-            
-            pbom_item = frappe.get_doc("FG Components", item.planning_bom_item_reference)
-            pdu_item_name = pbom_item.project_design_upload_item
-            
-            if not pdu_item_name:
+            pbom_item_to_qty[ref] = flt(item.bom_qty) if item.bom_qty else flt(item.quantity)
+
+        if not pbom_item_to_qty:
+            return
+
+        pdu_item_qty_map = {}
+        for fg in frappe.get_all(
+            "FG Components",
+            filters={"name": ["in", list(pbom_item_to_qty.keys())]},
+            fields=["name", "project_design_upload_item"],
+        ):
+            pdu_item_name = fg.project_design_upload_item
+            if not pdu_item_name or pdu_item_name in pdu_item_qty_map:
                 continue
-            
-            # Only count each PDU item once
-            if pdu_item_name not in pdu_item_qty_map:
-                # Use bom_qty if available, otherwise use quantity
-                issued_qty = flt(item.bom_qty) if item.bom_qty else flt(item.quantity)
-                pdu_item_qty_map[pdu_item_name] = {
-                    'quantity': issued_qty,
-                    'pbom_item': pbom_item
-                }
-        
-        # Now reverse each PDU item only once
-        for pdu_item_name, data in pdu_item_qty_map.items():
-            issued_qty = data['quantity']
-            
-            pdu_item = frappe.get_doc("Project Design Upload Item", pdu_item_name)
-            new_processed = max(0, flt(pdu_item.processed_qty) - issued_qty)
-            new_remaining = flt(pdu_item.quantity) - new_processed
-            
-            frappe.db.set_value("Project Design Upload Item", pdu_item_name, {
+            pdu_item_qty_map[pdu_item_name] = pbom_item_to_qty.get(fg.name, 0)
+
+        if not pdu_item_qty_map:
+            return
+
+        pdu_item_updates = {}
+        for pdu_row in frappe.get_all(
+            "Project Design Upload Item",
+            filters={"name": ["in", list(pdu_item_qty_map.keys())]},
+            fields=["name", "parent", "processed_qty", "quantity"],
+        ):
+            issued_qty = pdu_item_qty_map.get(pdu_row.name, 0)
+            new_processed = max(0, flt(pdu_row.processed_qty) - issued_qty)
+            new_remaining = flt(pdu_row.quantity) - new_processed
+            frappe.db.set_value("Project Design Upload Item", pdu_row.name, {
                 "processed_qty": new_processed,
-                "remaining_qty": max(0, new_remaining)
+                "remaining_qty": max(0, new_remaining),
             })
-            
-            pdu_name = pdu_item.parent
-            if pdu_name not in pdu_item_updates:
-                pdu_item_updates[pdu_name] = []
-            pdu_item_updates[pdu_name].append(pdu_item_name)
-        
+            pdu_item_updates.setdefault(pdu_row.parent, []).append(pdu_row.name)
+
         for pdu_name in pdu_item_updates:
             self.update_pdu_status(pdu_name)
 
@@ -1530,17 +1538,33 @@ def _allocate_rm_oc_pieces_for_reservation(doc):
         )
         rm_pieces.sort(key=lambda x: flt(x.get("current_length_mm") or 0))
 
+        # Ledger budgets (SLE-based, same as ERPNext negative-stock validation — not Bin).
+        oc_issue_remaining = flt(get_stock_balance(rm_item, oc_warehouse) or 0)
+        rm_issue_remaining = flt(get_stock_balance(rm_item, rm_warehouse) or 0)
+
         # FIRST: Allocate from OC pieces (shortest first)
         for oc in oc_pieces:
             if not cuts:
                 break
+            if oc_issue_remaining < 1:
+                break
+            sn = oc["name"]
+            was_reserved = sn in reserved_serial_nos
             assign_from_single_piece_no_save(oc, cuts, "OC")
+            if sn in reserved_serial_nos and not was_reserved:
+                oc_issue_remaining -= 1
 
         # SECOND: Allocate remaining cuts from RM pieces (shortest first)
         for bar in rm_pieces:
             if not cuts:
                 break
+            if rm_issue_remaining < 1:
+                break
+            sn = bar["name"]
+            was_reserved = sn in reserved_serial_nos
             assign_from_single_piece_no_save(bar, cuts, "RM")
+            if sn in reserved_serial_nos and not was_reserved:
+                rm_issue_remaining -= 1
 
         # THIRD: Anything remaining is NOT IN STOCK (NS)
         # Any remaining cut => its FG must be marked NIS
@@ -1754,17 +1778,30 @@ def _run_rm_oc_calculation(fg_selector_name: str) -> str:
         )
         rm_pieces.sort(key=lambda x: flt(x["current_length_mm"] or 0))
 
+        oc_issue_remaining = flt(get_stock_balance(rm_item, oc_warehouse) or 0)
+        rm_issue_remaining = flt(get_stock_balance(rm_item, rm_warehouse) or 0)
+
         # FIRST: Allocate from OC pieces (shortest first)
         for oc in oc_pieces:
             if not cuts:
                 break
-            sim_rows.extend(assign_from_single_piece(oc, cuts, "OC"))
+            if oc_issue_remaining < 1:
+                break
+            new_rows = assign_from_single_piece(oc, cuts, "OC")
+            sim_rows.extend(new_rows)
+            if any(r.get("open_stock_oc_reservation") == oc["name"] for r in new_rows):
+                oc_issue_remaining -= 1
 
         # SECOND: Allocate remaining cuts from RM pieces (shortest first)
         for bar in rm_pieces:
             if not cuts:
                 break
-            sim_rows.extend(assign_from_single_piece(bar, cuts, "RM"))
+            if rm_issue_remaining < 1:
+                break
+            new_rows = assign_from_single_piece(bar, cuts, "RM")
+            sim_rows.extend(new_rows)
+            if any(r.get("open_stock_rm_reservation") == bar["name"] for r in new_rows):
+                rm_issue_remaining -= 1
 
         # THIRD: Anything remaining is NOT IN STOCK (NS)
         for cut in cuts:

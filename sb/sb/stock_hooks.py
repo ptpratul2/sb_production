@@ -144,6 +144,55 @@ def clear_length_in_sle(doc, method):
         (doc.name, doc.doctype),
     )
 
+
+def clear_fg_raw_material_links_on_cancel(doc, method=None):
+    """
+    On Stock Entry cancel, unlink the matching FG Raw Material Selector child rows.
+
+    Without this, ``FG Raw Material Item.stock_entry`` keeps pointing at the cancelled
+    Stock Entry which (a) blocks deletion of the Stock Entry with
+    ``LinkExistsError: linked to FG Raw Material Selector`` and (b) keeps the desk
+    "Reserve Stock" button disabled because the JS guard treats any row with
+    ``reserve_tag=1 AND stock_entry`` as already reserved.
+
+    Only rows that point to **this** cancelled Stock Entry are affected; if other
+    Stock Entries created from the same selector are still live, they stay linked.
+    Bulk SQL UPDATE — fast and bypasses doc-level submitted-doc immutability.
+    """
+    if doc.doctype != "Stock Entry":
+        return
+
+    fg_name = getattr(doc, "fg_raw_material_selector", None)
+    if not fg_name:
+        return
+
+    selector_data = frappe.db.get_value(
+        "FG Raw Material Selector",
+        fg_name,
+        ["raw_material_warehouse", "reserved_warehouse"],
+        as_dict=True,
+    ) or {}
+    default_warehouse = selector_data.get("raw_material_warehouse") or "RM - Trial - Sbs"
+    reserved_warehouse = selector_data.get("reserved_warehouse") or "Reserve - Trial - Sbs"
+
+    frappe.db.sql(
+        """
+        UPDATE `tabFG Raw Material Item`
+        SET stock_entry = '',
+            reserve_tag = 0,
+            warehouse = CASE WHEN warehouse = %(reserved)s THEN %(default)s ELSE warehouse END
+        WHERE parent = %(parent)s
+          AND parenttype = 'FG Raw Material Selector'
+          AND stock_entry = %(se)s
+        """,
+        {
+            "se": doc.name,
+            "parent": fg_name,
+            "reserved": reserved_warehouse,
+            "default": default_warehouse,
+        },
+    )
+
 def update_serial_no_length(doc, method):
     """
     Update custom_length field in Serial No records from Stock Entry Detail items
@@ -170,54 +219,40 @@ def update_serial_no_length(doc, method):
         if item.serial_no:
             serial_nos = [s.strip() for s in item.serial_no.split('\n') if s.strip()]
         
-        # Method 2: New serial_and_batch_bundle system
         elif item.serial_and_batch_bundle:
             try:
-                # Query Serial and Batch Entry directly to get serial numbers
                 bundle_entries = frappe.get_all(
                     "Serial and Batch Entry",
                     filters={
                         "parent": item.serial_and_batch_bundle,
-                        "serial_no": ("is", "set")
+                        "serial_no": ("is", "set"),
                     },
                     fields=["serial_no"],
-                    order_by="idx"
+                    order_by="idx",
                 )
-                
-                # Extract serial_no values, filtering out None/empty values
-                serial_nos = [entry.serial_no.strip() for entry in bundle_entries if entry.serial_no and entry.serial_no.strip()]
-                
-            except Exception as e:
-                frappe.log_error(
-                    message=f"Error getting serial nos from bundle {item.serial_and_batch_bundle} in Stock Entry {doc.name}: {str(e)}",
-                    title="Serial Bundle Error"
-                )
+                serial_nos = [
+                    entry.serial_no.strip()
+                    for entry in bundle_entries
+                    if entry.serial_no and entry.serial_no.strip()
+                ]
+            except Exception:
+                # Bundle row not yet readable in this transaction — skip silently.
                 continue
-        
+
         if not serial_nos:
             continue
-        
-        # Update each Serial No's custom_length
-        # When use_serial_batch_fields is checked, always update the length
-        updated_count = 0
-        for serial_no in serial_nos:
-            try:
-                # Check if Serial No exists
-                if not frappe.db.exists("Serial No", serial_no):
-                    continue
-                
-                # Always update custom_length when use_serial_batch_fields is checked
-                frappe.db.set_value("Serial No", serial_no, "custom_length", length)
-                updated_count += 1
-                
-            except Exception as e:
-                frappe.log_error(
-                    message=f"Error updating Serial No {serial_no} length from Stock Entry {doc.name}: {str(e)}",
-                    title="Serial No Length Update Error"
-                )
-                continue
-        
-        # Keep this in the outer transaction; avoid fragmented commits in hooks.
+
+        # ONE bulk UPDATE replaces N row-level set_value calls. The hook fires inside
+        # the Stock Entry submit transaction, so this runs in the same txn.
+        placeholders = ", ".join(["%s"] * len(serial_nos))
+        frappe.db.sql(
+            f"""
+            UPDATE `tabSerial No`
+            SET custom_length = %s
+            WHERE name IN ({placeholders})
+            """,
+            (flt(length), *serial_nos),
+        )
 
 
 

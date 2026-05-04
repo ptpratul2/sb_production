@@ -164,6 +164,7 @@ doc_events = {
         "on_submit": "sb.sb.stock_hooks.sync_sle_length_after_submit",
         "on_cancel": [
             "sb.sb.stock_hooks.clear_length_in_sle",
+            "sb.sb.stock_hooks.clear_fg_raw_material_links_on_cancel",
         ],
     },
     "Purchase Receipt": {
